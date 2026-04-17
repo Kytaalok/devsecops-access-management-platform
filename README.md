@@ -1,18 +1,11 @@
-# Diplom DevSecOps Platform
+# DevSecOps Platform для диплома
 
-Monorepo for diploma project:
-"Centralized user and role management in a DevSecOps infrastructure".
+Проект дипломной работы:
+«Система централизованного управления пользователями и ролями в DevSecOps-инфраструктуре».
 
-## Planned structure
+## Структура проекта
 
-- `services/task-manager-api` - test application for IAM verification.
-- `infra/` - Kubernetes manifests, Helm charts, ingress, environment setup.
-- `cicd/` - Jenkinsfiles, pipeline shared scripts, security scan configs.
-- `docs/` - thesis assets, diagrams, test protocols.
-
-## Why monorepo for this diploma
-
-- One owner and one delivery stream.
-- Tight coupling between app, IAM, CI/CD, and infrastructure.
-- Easier traceability of architecture decisions and results in commit history.
-
+- `services/task-manager-api` - тестовое приложение для проверки IAM-механизмов.
+- `infra/` - Kubernetes-манифесты, Helm-чарты, ingress и настройка окружений.
+- `cicd/` - Jenkinsfile, скрипты pipeline и конфигурации security-сканирования.
+- `docs/` - материалы диплома, диаграммы и протоколы тестирования.
