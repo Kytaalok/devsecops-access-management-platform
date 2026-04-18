@@ -1,28 +1,28 @@
 # Task Manager API
 
-Test application for verifying IAM integration in the diploma stand.
+Тестовое приложение для проверки интеграции IAM в рамках дипломного стенда.
 
-## Features (step 1)
+## Возможности (этап 1)
 
-- Health endpoint.
-- CRUD for tasks.
-- `/me` endpoint for current user context.
-- Role-based access control (`admin`, `developer`, `viewer`).
-- JWT auth dependency prepared for Keycloak integration.
-- SQLAlchemy models and DB session.
-- Dockerfile for container build.
+- Endpoint для проверки состояния сервиса.
+- CRUD-операции для задач.
+- Endpoint `/me` для получения данных текущего пользователя.
+- Ролевой контроль доступа (`admin`, `developer`, `viewer`).
+- Подготовленный слой JWT-аутентификации для интеграции с Keycloak.
+- Модели SQLAlchemy и сессия БД.
+- Dockerfile для сборки контейнера.
 
-## Local run
+## Локальный запуск
 
-1. Create venv and install dependencies.
-2. Copy `.env.example` to `.env` and adjust values.
-3. Start API:
+1. Создать виртуальное окружение и установить зависимости.
+2. Скопировать `.env.example` в `.env` и задать значения переменных.
+3. Запустить API:
 
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## API routes
+## Маршруты API
 
 - `GET /health`
 - `GET /me`
@@ -32,12 +32,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `PUT /tasks/{task_id}`
 - `DELETE /tasks/{task_id}`
 
-## Auth behavior
+## Режимы аутентификации
 
-- `AUTH_ENABLED=false` (default): development mode, user context is read from headers.
-- `AUTH_ENABLED=true`: API expects `Authorization: Bearer <JWT>` and validates token against Keycloak JWKS.
+- `AUTH_ENABLED=false` (по умолчанию): режим разработки, данные пользователя читаются из заголовков.
+- `AUTH_ENABLED=true`: API ожидает `Authorization: Bearer <JWT>` и валидирует токен через Keycloak JWKS.
 
-Development headers:
+Заголовки для режима разработки:
 
 - `X-User-Id`
 - `X-Username`
