@@ -31,7 +31,7 @@
           <h2>Подключение к API</h2>
           <label class="field">
             <span>Base URL</span>
-            <input id="apiBaseUrl" type="text" placeholder="http://localhost:8000" />
+            <input id="apiBaseUrl" type="text" placeholder="/api" />
           </label>
           <label class="field">
             <span>Режим авторизации</span>
@@ -106,7 +106,7 @@
               <option value="archived">archived</option>
             </select>
           </label>
-          <button type="submit" class="btn btn-accent">Создать задачу</button>
+          <button id="createTaskBtn" type="submit" class="btn btn-accent">Создать задачу</button>
         </form>
 
         <div id="board" class="board"></div>
@@ -119,4 +119,3 @@
     <script src="./app.js"></script>
   </body>
 </html>
-

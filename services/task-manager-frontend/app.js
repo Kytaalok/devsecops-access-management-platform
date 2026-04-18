@@ -16,6 +16,7 @@ const el = {
   userRole: document.getElementById("userRole"),
   refreshBtn: document.getElementById("refreshBtn"),
   createTaskForm: document.getElementById("createTaskForm"),
+  createTaskBtn: document.getElementById("createTaskBtn"),
   taskTitle: document.getElementById("taskTitle"),
   taskDescription: document.getElementById("taskDescription"),
   taskStatus: document.getElementById("taskStatus"),
@@ -36,7 +37,7 @@ function showToast(message, isError = false) {
 
 function initDefaults() {
   const cfg = window.APP_CONFIG || {};
-  el.apiBaseUrl.value = cfg.apiBaseUrl || "http://localhost:8000";
+  el.apiBaseUrl.value = cfg.apiBaseUrl || "/api";
   el.authMode.value = cfg.authMode || "headers";
   el.userId.value = "dev-user-1";
   el.username.value = "devuser";
@@ -99,7 +100,9 @@ async function apiFetch(path, options = {}) {
 
 function renderProfile() {
   if (!state.me) {
-    el.meBox.innerHTML = '<p class="muted">Профиль не загружен.</p>';
+    el.meBox.innerHTML =
+      '<p class="muted">Профиль не загружен. Проверь Base URL и доступность API.</p>';
+    applyUiPermissions();
     return;
   }
   el.meBox.innerHTML = `
@@ -203,6 +206,7 @@ function applyUiPermissions() {
   formControls.forEach((node) => {
     node.disabled = !canCreate;
   });
+  el.createTaskBtn.disabled = !canCreate;
 }
 
 function renderBoard() {
@@ -291,4 +295,9 @@ el.createTaskForm.addEventListener("submit", async (event) => {
 initDefaults();
 refreshAll()
   .then(() => showToast("Интерфейс готов к работе."))
-  .catch((error) => showToast(error.message, true));
+  .catch((error) => {
+    state.me = null;
+    renderProfile();
+    renderBoard();
+    showToast(error.message, true);
+  });
