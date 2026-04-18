@@ -36,6 +36,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - `AUTH_ENABLED=false` (по умолчанию): режим разработки, данные пользователя читаются из заголовков.
 - `AUTH_ENABLED=true`: API ожидает `Authorization: Bearer <JWT>` и валидирует токен через Keycloak JWKS.
+- `CORS_ALLOW_ORIGINS`: список origin через запятую (или `*`) для доступа фронтенда.
 
 Заголовки для режима разработки:
 

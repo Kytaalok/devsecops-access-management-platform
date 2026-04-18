@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Task Manager Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Unbounded:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-shape shape-a"></div>
+    <div class="bg-shape shape-b"></div>
+    <div class="bg-shape shape-c"></div>
+
+    <main class="layout">
+      <section class="panel control-panel reveal">
+        <div class="brand">
+          <p class="eyebrow">DevSecOps Diploma</p>
+          <h1>Task Manager Console</h1>
+          <p class="muted">
+            Веб-интерфейс для демонстрации ролей и управления задачами через API.
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>Подключение к API</h2>
+          <label class="field">
+            <span>Base URL</span>
+            <input id="apiBaseUrl" type="text" placeholder="http://localhost:8000" />
+          </label>
+          <label class="field">
+            <span>Режим авторизации</span>
+            <select id="authMode">
+              <option value="headers">Dev headers</option>
+              <option value="token">Bearer token</option>
+            </select>
+          </label>
+          <label class="field" id="tokenField">
+            <span>JWT token</span>
+            <textarea id="tokenInput" rows="3" placeholder="eyJ..."></textarea>
+          </label>
+          <button id="refreshBtn" class="btn btn-primary">Обновить данные</button>
+        </div>
+
+        <div class="card">
+          <h2>Пользователь (dev)</h2>
+          <div class="grid-2">
+            <label class="field">
+              <span>User ID</span>
+              <input id="userId" type="text" />
+            </label>
+            <label class="field">
+              <span>Роль</span>
+              <select id="userRole">
+                <option value="admin">admin</option>
+                <option value="developer">developer</option>
+                <option value="viewer">viewer</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span>Username</span>
+            <input id="username" type="text" />
+          </label>
+          <label class="field">
+            <span>Email</span>
+            <input id="userEmail" type="email" />
+          </label>
+        </div>
+
+        <div class="card">
+          <h2>Профиль из API</h2>
+          <div id="meBox" class="user-box">
+            <p class="muted">Нажми «Обновить данные», чтобы загрузить профиль.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel workspace reveal">
+        <div class="workspace-head">
+          <h2>Задачи</h2>
+          <p class="muted">Создавай задачи и проверяй разграничение доступа по ролям.</p>
+        </div>
+
+        <form id="createTaskForm" class="card task-form">
+          <h3>Новая задача</h3>
+          <label class="field">
+            <span>Название</span>
+            <input id="taskTitle" type="text" maxlength="200" required />
+          </label>
+          <label class="field">
+            <span>Описание</span>
+            <textarea id="taskDescription" rows="3"></textarea>
+          </label>
+          <label class="field">
+            <span>Статус</span>
+            <select id="taskStatus">
+              <option value="new">new</option>
+              <option value="in_progress">in_progress</option>
+              <option value="done">done</option>
+              <option value="archived">archived</option>
+            </select>
+          </label>
+          <button type="submit" class="btn btn-accent">Создать задачу</button>
+        </form>
+
+        <div id="board" class="board"></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="./config.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
+

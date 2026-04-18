@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     keycloak_audience: str | None = None
     keycloak_client_id: str = "task-manager-api"
     keycloak_jwks_url: str | None = None
+    cors_allow_origins: str = "*"
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
