@@ -39,9 +39,9 @@ services:
       dockerfile: Dockerfile
     container_name: task-frontend
     depends_on:
-      api
+      - api
     ports:
-      -"8001:80"
+      - "8001:80"
   
 volumes:
   postgres_data
