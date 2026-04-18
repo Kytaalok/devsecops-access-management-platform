@@ -7,9 +7,9 @@ services:
       POSTGRES_USER: task_user
       POSTGRES_PASSWORD: task_password
     ports:
-      - "5432:5342"
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/posgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U task_user -d task_manager"]
       interval: 5s
@@ -24,9 +24,9 @@ services:
     container_name: task-api
     environment:
       APP_ENV: dev
-      AUTH_ENABLE: "false"
+      AUTH_ENABLED: "false"
       DATABASE_URL: postgresql+psycopg2://task_user:task_password@db:5432/task_manager
-      CORS_ALLOW_ORIGINS: http://localhost:8081
+      CORS_ALLOW_ORIGINS: http://localhost:8081,http://127.0.0.1:8081
     depends_on:
       db:
         condition: service_healthy
@@ -41,7 +41,7 @@ services:
     depends_on:
       - api
     ports:
-      - "8001:80"
+      - "8081:80"
   
 volumes:
   postgres_data:
