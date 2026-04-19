@@ -28,6 +28,12 @@ USERS_PASSWORD="${USERS_PASSWORD:-111}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin1@example.local}"
 DEV_EMAIL="${DEV_EMAIL:-dev1@example.local}"
 VIEWER_EMAIL="${VIEWER_EMAIL:-viewer1@example.local}"
+ADMIN_FIRST_NAME="${ADMIN_FIRST_NAME:-Admin}"
+ADMIN_LAST_NAME="${ADMIN_LAST_NAME:-One}"
+DEV_FIRST_NAME="${DEV_FIRST_NAME:-Dev}"
+DEV_LAST_NAME="${DEV_LAST_NAME:-One}"
+VIEWER_FIRST_NAME="${VIEWER_FIRST_NAME:-Viewer}"
+VIEWER_LAST_NAME="${VIEWER_LAST_NAME:-One}"
 
 API_DEPLOYMENT="${API_DEPLOYMENT:-api-deploy}"
 FRONTEND_DEPLOYMENT="${FRONTEND_DEPLOYMENT:-frontend-deploy}"
@@ -131,13 +137,9 @@ ensure_client() {
     "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}")"
   client_internal_id="$(jq -r '.[0].id // empty' <<<"${clients_json}")"
 
-  if [[ -n "${client_internal_id}" ]]; then
-    log "Client '${CLIENT_ID}' already exists"
-    return
-  fi
-
-  local payload
-  payload="$(cat <<JSON
+  if [[ -z "${client_internal_id}" ]]; then
+    local payload code
+    payload="$(cat <<JSON
 {
   "clientId": "${CLIENT_ID}",
   "name": "${CLIENT_ID}",
@@ -152,10 +154,30 @@ ensure_client() {
 }
 JSON
 )"
-  local code
-  code="$(request POST "${KEYCLOAK_URL}/admin/realms/${REALM}/clients" "${payload}" "${KC_ADMIN_TOKEN}")"
-  [[ "${code}" == "201" ]] || die "Failed to create client '${CLIENT_ID}' (HTTP ${code})"
-  log "Client '${CLIENT_ID}' created"
+    code="$(request POST "${KEYCLOAK_URL}/admin/realms/${REALM}/clients" "${payload}" "${KC_ADMIN_TOKEN}")"
+    [[ "${code}" == "201" ]] || die "Failed to create client '${CLIENT_ID}' (HTTP ${code})"
+    log "Client '${CLIENT_ID}' created"
+
+    clients_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+      "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}")"
+    client_internal_id="$(jq -r '.[0].id // empty' <<<"${clients_json}")"
+    [[ -n "${client_internal_id}" ]] || die "Client '${CLIENT_ID}' created but internal ID not found"
+  fi
+
+  local client_repr patched_repr code
+  client_repr="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    "${KEYCLOAK_URL}/admin/realms/${REALM}/clients/${client_internal_id}")"
+  patched_repr="$(jq \
+    '.enabled=true
+    | .publicClient=true
+    | .directAccessGrantsEnabled=true
+    | .standardFlowEnabled=true
+    | .serviceAccountsEnabled=false
+    | .redirectUris=["*"]
+    | .webOrigins=["*"]' <<<"${client_repr}")"
+  code="$(request PUT "${KEYCLOAK_URL}/admin/realms/${REALM}/clients/${client_internal_id}" "${patched_repr}" "${KC_ADMIN_TOKEN}")"
+  [[ "${code}" == "204" ]] || die "Failed to update client '${CLIENT_ID}' configuration (HTTP ${code})"
+  log "Client '${CLIENT_ID}' is configured for direct grants"
 }
 
 ensure_role() {
@@ -178,6 +200,8 @@ ensure_user_with_role() {
   local username="$1"
   local email="$2"
   local role="$3"
+  local first_name="$4"
+  local last_name="$5"
 
   local users_json user_id
   users_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
@@ -190,8 +214,11 @@ ensure_user_with_role() {
 {
   "username": "${username}",
   "email": "${email}",
+  "firstName": "${first_name}",
+  "lastName": "${last_name}",
   "enabled": true,
-  "emailVerified": true
+  "emailVerified": true,
+  "requiredActions": []
 }
 JSON
 )"
@@ -205,6 +232,22 @@ JSON
   else
     log "User '${username}' already exists"
   fi
+
+  local user_update_payload
+  user_update_payload="$(cat <<JSON
+{
+  "username": "${username}",
+  "email": "${email}",
+  "firstName": "${first_name}",
+  "lastName": "${last_name}",
+  "enabled": true,
+  "emailVerified": true,
+  "requiredActions": []
+}
+JSON
+)"
+  code="$(request PUT "${KEYCLOAK_URL}/admin/realms/${REALM}/users/${user_id}" "${user_update_payload}" "${KC_ADMIN_TOKEN}")"
+  [[ "${code}" == "204" ]] || die "Failed to update profile for '${username}' (HTTP ${code})"
 
   local pass_payload code
   pass_payload="$(cat <<JSON
@@ -309,9 +352,9 @@ ensure_client
 ensure_role "admin"
 ensure_role "developer"
 ensure_role "viewer"
-ensure_user_with_role "${ADMIN_USER}" "${ADMIN_EMAIL}" "admin"
-ensure_user_with_role "${DEV_USER}" "${DEV_EMAIL}" "developer"
-ensure_user_with_role "${VIEWER_USER}" "${VIEWER_EMAIL}" "viewer"
+ensure_user_with_role "${ADMIN_USER}" "${ADMIN_EMAIL}" "admin" "${ADMIN_FIRST_NAME}" "${ADMIN_LAST_NAME}"
+ensure_user_with_role "${DEV_USER}" "${DEV_EMAIL}" "developer" "${DEV_FIRST_NAME}" "${DEV_LAST_NAME}"
+ensure_user_with_role "${VIEWER_USER}" "${VIEWER_EMAIL}" "viewer" "${VIEWER_FIRST_NAME}" "${VIEWER_LAST_NAME}"
 
 log "Running service-level checks..."
 test_service_endpoints "postgres-svc"
@@ -431,4 +474,3 @@ echo "================================================"
 if (( FAIL_COUNT > 0 )); then
   exit 1
 fi
-
