@@ -14,3 +14,17 @@ spec:
     metadata:
       labels:
         app: api
+    spec:
+      containers:
+        - name: api
+          image: task-manager-api:dev
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: api-config
+            - secretRef:
+                name: api-secret
