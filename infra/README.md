@@ -72,4 +72,33 @@ sudo k3s ctr images list | grep -E "task-manager-api|task-manager-frontend"
 curl -s http://api.83.69.249.206.nip.io/health
 ```
 
+## Автоскрипт bootstrap + тесты
+
+Скрипт создаёт/обновляет в Keycloak:
+- realm,
+- client,
+- роли `admin/developer/viewer`,
+- пользователей `admin1/dev1/viewer1`,
+- а затем запускает smoke/RBAC проверки для `frontend/api/keycloak/postgres`.
+
+Файл:
+- `infra/scripts/bootstrap_keycloak_and_smoke_test.sh`
+
+Запуск:
+
+```bash
+chmod +x infra/scripts/bootstrap_keycloak_and_smoke_test.sh
+./infra/scripts/bootstrap_keycloak_and_smoke_test.sh
+```
+
+Переопределение параметров (пример):
+
+```bash
+SERVER_IP=83.69.249.206 \
+KEYCLOAK_ADMIN_USER=admin \
+KEYCLOAK_ADMIN_PASSWORD=admin \
+USERS_PASSWORD=111 \
+./infra/scripts/bootstrap_keycloak_and_smoke_test.sh
+```
+
 
