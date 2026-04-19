@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: task-manager-api
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: app.83.69.249.206.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-svc
+                port:
+                  number: 80
+    - host: api.83.69.249.206.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-svc
+                port:
+                  number: 80
+    - host: keycloak.83.69.249.206.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak-svc
+                port:
+                  number: 8080
