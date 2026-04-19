@@ -24,9 +24,13 @@ services:
     container_name: task-api
     environment:
       APP_ENV: dev
-      AUTH_ENABLED: "false"
+      AUTH_ENABLED: "true"
       DATABASE_URL: postgresql+psycopg2://task_user:task_password@db:5432/task_manager
       CORS_ALLOW_ORIGINS: http://localhost:8081,http://127.0.0.1:8081
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/devsecops
+      KEYCLOAK_CLIENT_ID: task-manager-api
+      KEYCLOAK_AUDIENCE: account
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/devsecops/protocol/openid-connect/certs
     depends_on:
       db:
         condition: service_healthy
@@ -42,6 +46,18 @@ services:
       - api
     ports:
       - "8081:80"
+  
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: task-keycloak
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+
+
   
 volumes:
   postgres_data:
