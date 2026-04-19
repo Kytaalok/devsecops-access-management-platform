@@ -18,3 +18,5 @@ venv/
 Thumbs.db
 .DS_Store
 
+infra/k3s/base/api-secret.yaml
+infra/k3s/base/postgres-secret.yaml
