@@ -1,6 +1,3 @@
-# HTTPS-ингресс для Keycloak.
-# Требует предварительно созданного secret keycloak-tls-secret
-# (см. keycloak-tls-secret.example.yaml).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
