@@ -17,6 +17,11 @@ spec:
       command: ["sleep"]
       args: ["99d"]
       tty: true
+    - name: trivy
+      image: aquasec/trivy:latest
+      command: ["sleep"]
+      args: ["99d"]
+      tty: true
 '''
     }
   }
@@ -30,6 +35,8 @@ spec:
   parameters {
     booleanParam(name: 'RUN_SMOKE_TEST', defaultValue: false, description: 'Запустить infra/scripts/bootstrap_keycloak_and_smoke_test.sh')
     booleanParam(name: 'SEMGREP_STRICT', defaultValue: false, description: 'Падать, если Semgrep нашел проблемы')
+    booleanParam(name: 'TRIVY_STRICT', defaultValue: false, description: 'Падать, если Trivy нашел HIGH/CRITICAL')
+    string(name: 'TRIVY_SEVERITY', defaultValue: 'HIGH,CRITICAL', description: 'Уровни уязвимостей для Trivy')
     string(name: 'SERVER_IP', defaultValue: '83.69.249.206', description: 'Публичный IP VPS/стенда')
     string(name: 'NAMESPACE', defaultValue: 'task-manager-api', description: 'Namespace приложения')
     string(name: 'JENKINS_NAMESPACE', defaultValue: 'cicd', description: 'Namespace Jenkins')
@@ -85,6 +92,36 @@ spec:
       post {
         always {
           archiveArtifacts artifacts: 'reports/semgrep.json', allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('Trivy') {
+      steps {
+        container('trivy') {
+          sh '''
+            set -euo pipefail
+            mkdir -p reports .trivycache
+
+            if [ "${TRIVY_STRICT}" = "true" ]; then
+              TRIVY_EXIT_CODE=1
+            else
+              TRIVY_EXIT_CODE=0
+            fi
+
+            trivy fs . \
+              --cache-dir .trivycache \
+              --no-progress \
+              --format sarif \
+              --output reports/trivy.sarif \
+              --severity "${TRIVY_SEVERITY}" \
+              --exit-code "${TRIVY_EXIT_CODE}"
+          '''
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'reports/trivy.sarif', allowEmptyArchive: true
         }
       }
     }
