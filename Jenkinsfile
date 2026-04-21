@@ -103,19 +103,26 @@ spec:
             set -euo pipefail
             mkdir -p reports .trivycache
 
-            if [ "${TRIVY_STRICT}" = "true" ]; then
-              TRIVY_EXIT_CODE=1
-            else
-              TRIVY_EXIT_CODE=0
-            fi
-
+            # 1) Всегда формируем SARIF-отчет 
             trivy fs . \
               --cache-dir .trivycache \
               --no-progress \
               --format sarif \
               --output reports/trivy.sarif \
               --severity "${TRIVY_SEVERITY}" \
-              --exit-code "${TRIVY_EXIT_CODE}"
+              --scanners vuln,secret \
+              --exit-code 0
+
+            # 2) Гейт только если strict=true
+            if [ "${TRIVY_STRICT}" = "true" ]; then
+              trivy fs . \
+                --cache-dir .trivycache \
+                --no-progress \
+                --format table \
+                --severity "${TRIVY_SEVERITY}" \
+                --scanners vuln,secret \
+                --exit-code 1
+            fi
           '''
         }
       }
