@@ -29,25 +29,22 @@ pipeline {
 
     stage('Gitleaks (Docker)') {
       steps {
-        sh '''
-          set -euo pipefail
-          mkdir -p reports
+        container('docker-cli') {
+          sh '''
+            set -euo pipefail
+            mkdir -p reports
 
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "[ERROR] Docker is required for Gitleaks stage"
-            exit 1
-          fi
-
-          docker run --rm \
-            -v "$PWD:/repo" \
-            -w /repo \
-            ghcr.io/gitleaks/gitleaks:v${GITLEAKS_VERSION} \
-              gitleaks git . \
-                --redact \
-                --report-format sarif \
-                --report-path reports/gitleaks.sarif \
-                --exit-code 1
-        '''
+            docker run --rm \
+              -v "$PWD:/repo" \
+              -w /repo \
+              ghcr.io/gitleaks/gitleaks:v${GITLEAKS_VERSION} \
+                gitleaks git . \
+                  --redact \
+                  --report-format sarif \
+                  --report-path reports/gitleaks.sarif \
+                  --exit-code 1
+          '''
+        }
       }
       post {
         always {
@@ -58,29 +55,26 @@ pipeline {
 
     stage('Semgrep (Docker)') {
       steps {
-        sh '''
-          set -euo pipefail
-          mkdir -p reports
+        container('docker-cli') {
+          sh '''
+            set -euo pipefail
+            mkdir -p reports
 
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "[ERROR] Docker is required for Semgrep stage"
-            exit 1
-          fi
-
-          if [ "${SEMGREP_STRICT}" = "true" ]; then
-            docker run --rm \
-              -v "$PWD:/src" \
-              -w /src \
-              returntocorp/semgrep:${SEMGREP_VERSION} \
-                semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
-          else
-            docker run --rm \
-              -v "$PWD:/src" \
-              -w /src \
-              returntocorp/semgrep:${SEMGREP_VERSION} \
-                semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
-          fi
-        '''
+            if [ "${SEMGREP_STRICT}" = "true" ]; then
+              docker run --rm \
+                -v "$PWD:/src" \
+                -w /src \
+                returntocorp/semgrep:${SEMGREP_VERSION} \
+                  semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
+            else
+              docker run --rm \
+                -v "$PWD:/src" \
+                -w /src \
+                returntocorp/semgrep:${SEMGREP_VERSION} \
+                  semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
+            fi
+          '''
+        }
       }
       post {
         always {
