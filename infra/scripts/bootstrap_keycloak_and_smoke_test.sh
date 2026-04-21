@@ -2,20 +2,23 @@
 set -Eeuo pipefail
 
 ###############################################################################
-# Bootstrap Keycloak (realm/roles/users), get tokens, and run smoke tests
-# for frontend, API, Keycloak, and Postgres in k3s.
+# Bootstrap Keycloak (realm/roles/users/clients), get tokens, and run smoke
+# tests for frontend, API, Keycloak, Postgres, and Jenkins in k3s.
 ###############################################################################
 
 # ------------------------------- Configuration ------------------------------ #
 NAMESPACE="${NAMESPACE:-task-manager-api}"
 SERVER_IP="${SERVER_IP:-83.69.249.206}"
+JENKINS_NAMESPACE="${JENKINS_NAMESPACE:-cicd}"
 
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://keycloak.${SERVER_IP}.nip.io}"
 API_URL="${API_URL:-http://api.${SERVER_IP}.nip.io}"
 FRONTEND_URL="${FRONTEND_URL:-http://app.${SERVER_IP}.nip.io}"
+JENKINS_URL="${JENKINS_URL:-http://jenkins.${SERVER_IP}.nip.io}"
 
 REALM="${REALM:-devsecops}"
 CLIENT_ID="${CLIENT_ID:-task-manager-api}"
+JENKINS_CLIENT_ID="${JENKINS_CLIENT_ID:-jenkins}"
 
 KEYCLOAK_ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
 KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
@@ -39,6 +42,8 @@ API_DEPLOYMENT="${API_DEPLOYMENT:-api-deploy}"
 FRONTEND_DEPLOYMENT="${FRONTEND_DEPLOYMENT:-frontend-deploy}"
 KEYCLOAK_DEPLOYMENT="${KEYCLOAK_DEPLOYMENT:-keycloak}"
 POSTGRES_STS="${POSTGRES_STS:-postgres-db}"
+JENKINS_STS="${JENKINS_STS:-jenkins}"
+JENKINS_SERVICE="${JENKINS_SERVICE:-jenkins}"
 
 POSTGRES_SECRET_NAME="${POSTGRES_SECRET_NAME:-postgres-secret}"
 POSTGRES_POD="${POSTGRES_POD:-postgres-db-0}"
@@ -47,9 +52,15 @@ POSTGRES_POD="${POSTGRES_POD:-postgres-db-0}"
 KEYCLOAK_URL="${KEYCLOAK_URL%/}"
 API_URL="${API_URL%/}"
 FRONTEND_URL="${FRONTEND_URL%/}"
+JENKINS_URL="${JENKINS_URL%/}"
+
+JENKINS_REDIRECT_URI="${JENKINS_REDIRECT_URI:-${JENKINS_URL}/securityRealm/finishLogin}"
+JENKINS_POST_LOGOUT_URI="${JENKINS_POST_LOGOUT_URI:-${JENKINS_URL}/OicLogout}"
+JENKINS_WEB_ORIGIN="${JENKINS_WEB_ORIGIN:-${JENKINS_URL}}"
 
 TMP_DIR="$(mktemp -d)"
 REQ_BODY="${TMP_DIR}/response.json"
+REQ_HEADERS="${TMP_DIR}/headers.txt"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 PASS_COUNT=0
@@ -180,6 +191,62 @@ JSON
   log "Client '${CLIENT_ID}' is configured for direct grants"
 }
 
+ensure_jenkins_client() {
+  local clients_json client_internal_id
+  clients_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${JENKINS_CLIENT_ID}")"
+  client_internal_id="$(jq -r '.[0].id // empty' <<<"${clients_json}")"
+
+  if [[ -z "${client_internal_id}" ]]; then
+    local payload code
+    payload="$(cat <<JSON
+{
+  "clientId": "${JENKINS_CLIENT_ID}",
+  "name": "${JENKINS_CLIENT_ID}",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "publicClient": false,
+  "directAccessGrantsEnabled": false,
+  "standardFlowEnabled": true,
+  "serviceAccountsEnabled": false,
+  "redirectUris": ["${JENKINS_REDIRECT_URI}"],
+  "webOrigins": ["${JENKINS_WEB_ORIGIN}"],
+  "attributes": {
+    "post.logout.redirect.uris": "${JENKINS_POST_LOGOUT_URI}"
+  }
+}
+JSON
+)"
+    code="$(request POST "${KEYCLOAK_URL}/admin/realms/${REALM}/clients" "${payload}" "${KC_ADMIN_TOKEN}")"
+    [[ "${code}" == "201" ]] || die "Failed to create client '${JENKINS_CLIENT_ID}' (HTTP ${code})"
+    log "Client '${JENKINS_CLIENT_ID}' created"
+
+    clients_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+      "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${JENKINS_CLIENT_ID}")"
+    client_internal_id="$(jq -r '.[0].id // empty' <<<"${clients_json}")"
+    [[ -n "${client_internal_id}" ]] || die "Client '${JENKINS_CLIENT_ID}' created but internal ID not found"
+  fi
+
+  local client_repr patched_repr code
+  client_repr="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    "${KEYCLOAK_URL}/admin/realms/${REALM}/clients/${client_internal_id}")"
+  patched_repr="$(jq \
+    --arg redirect "${JENKINS_REDIRECT_URI}" \
+    --arg post_logout "${JENKINS_POST_LOGOUT_URI}" \
+    --arg web_origin "${JENKINS_WEB_ORIGIN}" \
+    '.enabled=true
+    | .publicClient=false
+    | .directAccessGrantsEnabled=false
+    | .standardFlowEnabled=true
+    | .serviceAccountsEnabled=false
+    | .redirectUris=[$redirect]
+    | .webOrigins=[$web_origin]
+    | .attributes["post.logout.redirect.uris"]=$post_logout' <<<"${client_repr}")"
+  code="$(request PUT "${KEYCLOAK_URL}/admin/realms/${REALM}/clients/${client_internal_id}" "${patched_repr}" "${KC_ADMIN_TOKEN}")"
+  [[ "${code}" == "204" ]] || die "Failed to update client '${JENKINS_CLIENT_ID}' configuration (HTTP ${code})"
+  log "Client '${JENKINS_CLIENT_ID}' is configured for Jenkins OIDC"
+}
+
 ensure_role() {
   local role="$1"
   local code
@@ -272,7 +339,8 @@ JSON
 
 test_rollout() {
   local kind_name="$1"
-  if kubectl -n "${NAMESPACE}" rollout status "${kind_name}" --timeout=180s >/dev/null; then
+  local namespace="${2:-${NAMESPACE}}"
+  if kubectl -n "${namespace}" rollout status "${kind_name}" --timeout=180s >/dev/null; then
     pass "Rollout: ${kind_name}"
   else
     fail "Rollout: ${kind_name}"
@@ -304,12 +372,55 @@ test_http_code() {
 
 test_service_endpoints() {
   local svc="$1"
+  local namespace="${2:-${NAMESPACE}}"
   local endpoints
-  endpoints="$(kubectl -n "${NAMESPACE}" get endpoints "${svc}" -o jsonpath='{range .subsets[*].addresses[*]}{.ip}{" "}{end}' 2>/dev/null || true)"
+  endpoints="$(kubectl -n "${namespace}" get endpoints "${svc}" -o jsonpath='{range .subsets[*].addresses[*]}{.ip}{" "}{end}' 2>/dev/null || true)"
   if [[ -n "${endpoints}" ]]; then
     pass "Endpoints present for ${svc}: ${endpoints}"
   else
     fail "No endpoints for service ${svc}"
+  fi
+}
+
+test_jenkins_oidc_redirect() {
+  local code location
+  : > "${REQ_HEADERS}"
+  code="$(curl -sS -D "${REQ_HEADERS}" -o "${REQ_BODY}" -w "%{http_code}" \
+    "${JENKINS_URL}/securityRealm/commenceLogin?from=%2F" || true)"
+
+  if [[ "${code}" != "302" && "${code}" != "303" ]]; then
+    fail "Jenkins OIDC commenceLogin -> expected 302/303, got ${code}"
+    return
+  fi
+
+  location="$(awk 'BEGIN{IGNORECASE=1} /^Location:/{sub(/\r$/,"",$2); print $2; exit}' "${REQ_HEADERS}")"
+  if [[ -z "${location}" ]]; then
+    fail "Jenkins OIDC commenceLogin -> missing Location header"
+    return
+  fi
+
+  if [[ "${location}" == *"/realms/${REALM}/protocol/openid-connect/auth"* ]]; then
+    pass "Jenkins OIDC redirect to Keycloak auth endpoint"
+  else
+    fail "Jenkins OIDC redirect unexpected location: ${location}"
+  fi
+}
+
+test_keycloak_auth_request_for_jenkins() {
+  local encoded_redirect code
+  encoded_redirect="$(jq -rn --arg v "${JENKINS_REDIRECT_URI}" '$v|@uri')"
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    "${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/auth?client_id=${JENKINS_CLIENT_ID}&redirect_uri=${encoded_redirect}&response_type=code&scope=openid&state=smoke&nonce=smoke" || true)"
+
+  if grep -qi "Invalid parameter: redirect_uri" "${REQ_BODY}"; then
+    fail "Keycloak auth request for Jenkins client -> invalid redirect_uri"
+    return
+  fi
+
+  if [[ "${code}" == "200" || "${code}" == "302" ]]; then
+    pass "Keycloak auth request for Jenkins client is valid"
+  else
+    fail "Keycloak auth request for Jenkins client -> unexpected HTTP ${code}"
   fi
 }
 
@@ -336,12 +447,14 @@ log "Using namespace: ${NAMESPACE}"
 log "Keycloak URL: ${KEYCLOAK_URL}"
 log "API URL: ${API_URL}"
 log "Frontend URL: ${FRONTEND_URL}"
+log "Jenkins URL: ${JENKINS_URL}"
 
 log "Waiting for core workloads..."
 test_rollout "deployment/${KEYCLOAK_DEPLOYMENT}"
 test_rollout "deployment/${API_DEPLOYMENT}"
 test_rollout "deployment/${FRONTEND_DEPLOYMENT}"
 test_rollout "statefulset/${POSTGRES_STS}"
+test_rollout "statefulset/${JENKINS_STS}" "${JENKINS_NAMESPACE}"
 
 log "Bootstrapping Keycloak..."
 KC_ADMIN_TOKEN="$(get_admin_token)"
@@ -349,6 +462,7 @@ KC_ADMIN_TOKEN="$(get_admin_token)"
 
 ensure_realm
 ensure_client
+ensure_jenkins_client
 ensure_role "admin"
 ensure_role "developer"
 ensure_role "viewer"
@@ -361,12 +475,16 @@ test_service_endpoints "postgres-svc"
 test_service_endpoints "keycloak-svc"
 test_service_endpoints "api-svc"
 test_service_endpoints "frontend-svc"
+test_service_endpoints "${JENKINS_SERVICE}" "${JENKINS_NAMESPACE}"
 test_postgres_query
 
 log "Running HTTP checks..."
 test_http_code "Frontend root" "200" "${FRONTEND_URL}/"
 test_http_code "API health" "200" "${API_URL}/health"
 test_http_code "Keycloak OIDC discovery" "200" "${KEYCLOAK_URL}/realms/${REALM}/.well-known/openid-configuration"
+test_http_code "Jenkins login page" "200" "${JENKINS_URL}/login"
+test_jenkins_oidc_redirect
+test_keycloak_auth_request_for_jenkins
 
 log "Getting user tokens..."
 ADMIN_TOKEN="$(get_user_token "${ADMIN_USER}" "${USERS_PASSWORD}")"
