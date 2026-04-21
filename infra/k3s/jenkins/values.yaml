@@ -56,7 +56,7 @@ controller:
 
         logoutFromOpenidProvider: true
         rootURLFromRequest: false
-        postLogoutRedirectUrl: "http://jenkins.83.69.249.206.nip.io/login"
+        postLogoutRedirectUrl: "http://jenkins.83.69.249.206.nip.io/securityRealm/commenceLogin?from=%2F"
 
         allowTokenAccessWithoutOicSession: false
         disableSslVerification: false

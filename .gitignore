@@ -18,6 +18,11 @@ venv/
 Thumbs.db
 .DS_Store
 
+# Infra secrets
 infra/k3s/base/api-secret.yaml
 infra/k3s/base/postgres-secret.yaml
 infra/k3s/jenkins/secrets/*.env
+
+# Reports
+reports/
+gitleaks-report.json
