@@ -1,5 +1,29 @@
 pipeline {
-  agent any
+  agent {
+    kubernetes {
+      defaultContainer 'jnlp'
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: gitleaks
+      image: ghcr.io/gitleaks/gitleaks:v8.30.0
+      command:
+        - sleep
+      args:
+        - "99d"
+      tty: true
+    - name: semgrep
+      image: returntocorp/semgrep:1.160.0
+      command:
+        - sleep
+      args:
+        - "99d"
+      tty: true
+'''
+    }
+  }
 
   options {
     disableConcurrentBuilds()
@@ -15,11 +39,6 @@ pipeline {
     string(name: 'JENKINS_NAMESPACE', defaultValue: 'cicd', description: 'Namespace Jenkins')
   }
 
-  environment {
-    GITLEAKS_VERSION = '8.30.0'
-    SEMGREP_VERSION  = '1.160.0'
-  }
-
   stages {
     stage('Checkout') {
       steps {
@@ -27,22 +46,17 @@ pipeline {
       }
     }
 
-    stage('Gitleaks (Docker)') {
+    stage('Gitleaks') {
       steps {
-        container('docker-cli') {
+        container('gitleaks') {
           sh '''
             set -euo pipefail
             mkdir -p reports
-
-            docker run --rm \
-              -v "$PWD:/repo" \
-              -w /repo \
-              ghcr.io/gitleaks/gitleaks:v${GITLEAKS_VERSION} \
-                gitleaks git . \
-                  --redact \
-                  --report-format sarif \
-                  --report-path reports/gitleaks.sarif \
-                  --exit-code 1
+            gitleaks git . \
+              --redact \
+              --report-format sarif \
+              --report-path reports/gitleaks.sarif \
+              --exit-code 1
           '''
         }
       }
@@ -53,25 +67,17 @@ pipeline {
       }
     }
 
-    stage('Semgrep (Docker)') {
+    stage('Semgrep') {
       steps {
-        container('docker-cli') {
+        container('semgrep') {
           sh '''
             set -euo pipefail
             mkdir -p reports
 
             if [ "${SEMGREP_STRICT}" = "true" ]; then
-              docker run --rm \
-                -v "$PWD:/src" \
-                -w /src \
-                returntocorp/semgrep:${SEMGREP_VERSION} \
-                  semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
+              semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
             else
-              docker run --rm \
-                -v "$PWD:/src" \
-                -w /src \
-                returntocorp/semgrep:${SEMGREP_VERSION} \
-                  semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
+              semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
             fi
           '''
         }
