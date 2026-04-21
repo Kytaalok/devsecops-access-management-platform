@@ -144,6 +144,25 @@ get_user_token() {
   jq -r '.access_token // empty' <<<"${body}"
 }
 
+decode_jwt_payload() {
+  local token="$1"
+  local payload
+  payload="$(cut -d '.' -f2 <<<"${token}")"
+  payload="${payload//-/+}"
+  payload="${payload//_/\/}"
+  while (( ${#payload} % 4 != 0 )); do
+    payload="${payload}="
+  done
+  printf '%s' "${payload}" | base64 -d 2>/dev/null || true
+}
+
+token_groups_csv() {
+  local token="$1"
+  local payload_json
+  payload_json="$(decode_jwt_payload "${token}")"
+  jq -r '(.groups // []) | if type=="array" then join(",") else tostring end' <<<"${payload_json}" 2>/dev/null || true
+}
+
 ensure_realm() {
   local code
   code="$(request GET "${KEYCLOAK_URL}/admin/realms/${REALM}" "" "${KC_ADMIN_TOKEN}")"
@@ -392,6 +411,23 @@ ensure_user_with_role() {
   code="$(request PUT "${KEYCLOAK_URL}/admin/realms/${REALM}/users/${user_id}/reset-password" "${pass_payload}" "${KC_ADMIN_TOKEN}")"
   [[ "${code}" == "204" ]] || die "Failed to set password for '${username}' (HTTP ${code})"
 
+  # Keep only one diploma realm-role per user to avoid privilege leaks
+  # from previous runs (e.g. developer/viewer still having admin).
+  local user_roles_json removable_roles_json removable_count
+  user_roles_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    "${KEYCLOAK_URL}/admin/realms/${REALM}/users/${user_id}/role-mappings/realm")"
+  removable_roles_json="$(jq -c --arg keep "${role}" \
+    '[.[] | select((.name=="admin" or .name=="developer" or .name=="viewer") and .name != $keep)]' \
+    <<<"${user_roles_json}")"
+  removable_count="$(jq -r 'length' <<<"${removable_roles_json}")"
+  if [[ "${removable_count}" != "0" ]]; then
+    code="$(request DELETE \
+      "${KEYCLOAK_URL}/admin/realms/${REALM}/users/${user_id}/role-mappings/realm" \
+      "${removable_roles_json}" "${KC_ADMIN_TOKEN}")"
+    [[ "${code}" == "204" ]] || die "Failed to remove extra diploma roles from '${username}' (HTTP ${code})"
+    log "Removed ${removable_count} extra diploma role(s) from '${username}'"
+  fi
+
   local role_json
   role_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/roles/${role}")"
@@ -511,10 +547,9 @@ test_postgres_query() {
 
 # --------------- Kubernetes RBAC  ------------------------------------ #
 
-K8S_RBAC_OPTS=()
+K8S_RBAC_BASE_ARGS=()
 if [[ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]]; then
-  K8S_KUBECONFIG="/dev/null"
-  K8S_RBAC_OPTS=(
+  K8S_RBAC_BASE_ARGS=(
     "--server=https://kubernetes.default.svc"
     "--certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
   )
@@ -532,7 +567,41 @@ else
   if [[ "${K8S_KUBECONFIG}" != *:* && ! -f "${K8S_KUBECONFIG}" ]]; then
     die "kubeconfig for RBAC checks not found: ${K8S_KUBECONFIG}"
   fi
-  log "Running outside pod - using kubeconfig for k8s API: ${K8S_KUBECONFIG}"
+
+  local_kcfg_json="$(kubectl --kubeconfig="${K8S_KUBECONFIG}" config view --raw -o json 2>/dev/null || true)"
+  [[ -n "${local_kcfg_json}" ]] || die "Failed to read kubeconfig for RBAC checks: ${K8S_KUBECONFIG}"
+
+  local_current_ctx="$(jq -r '."current-context" // empty' <<<"${local_kcfg_json}")"
+  [[ -n "${local_current_ctx}" ]] || die "No current-context found in kubeconfig: ${K8S_KUBECONFIG}"
+
+  local_cluster_name="$(jq -r --arg ctx "${local_current_ctx}" '.contexts[] | select(.name==$ctx) | .context.cluster // empty' <<<"${local_kcfg_json}" | head -n1)"
+  [[ -n "${local_cluster_name}" ]] || die "Cannot resolve cluster for context '${local_current_ctx}'"
+
+  local_server="$(jq -r --arg c "${local_cluster_name}" '.clusters[] | select(.name==$c) | .cluster.server // empty' <<<"${local_kcfg_json}" | head -n1)"
+  [[ -n "${local_server}" ]] || die "Cannot resolve API server for cluster '${local_cluster_name}'"
+  K8S_RBAC_BASE_ARGS+=("--server=${local_server}")
+
+  local_ca_data="$(jq -r --arg c "${local_cluster_name}" '.clusters[] | select(.name==$c) | .cluster["certificate-authority-data"] // empty' <<<"${local_kcfg_json}" | head -n1)"
+  local_ca_file="$(jq -r --arg c "${local_cluster_name}" '.clusters[] | select(.name==$c) | .cluster["certificate-authority"] // empty' <<<"${local_kcfg_json}" | head -n1)"
+  local_insecure="$(jq -r --arg c "${local_cluster_name}" '.clusters[] | select(.name==$c) | .cluster["insecure-skip-tls-verify"] // false' <<<"${local_kcfg_json}" | head -n1)"
+
+  if [[ -n "${local_ca_data}" ]]; then
+    K8S_RBAC_CA_FILE="${TMP_DIR}/k8s-rbac-ca.crt"
+    printf '%s' "${local_ca_data}" | base64 -d > "${K8S_RBAC_CA_FILE}" || die "Failed to decode certificate-authority-data"
+    K8S_RBAC_BASE_ARGS+=("--certificate-authority=${K8S_RBAC_CA_FILE}")
+  elif [[ -n "${local_ca_file}" ]]; then
+    if [[ "${local_ca_file}" != /* && "${K8S_KUBECONFIG}" != *:* ]]; then
+      local_ca_file="$(cd "$(dirname "${K8S_KUBECONFIG}")" && pwd)/${local_ca_file}"
+    fi
+    [[ -f "${local_ca_file}" ]] || die "certificate-authority file not found: ${local_ca_file}"
+    K8S_RBAC_BASE_ARGS+=("--certificate-authority=${local_ca_file}")
+  elif [[ "${local_insecure}" == "true" ]]; then
+    K8S_RBAC_BASE_ARGS+=("--insecure-skip-tls-verify=true")
+  else
+    die "No certificate-authority data/file found for RBAC checks in kubeconfig"
+  fi
+
+  log "Running outside pod - RBAC checks will use server ${local_server} from kubeconfig ${K8S_KUBECONFIG}"
 fi
 
 test_clusterrole_exists() {
@@ -582,7 +651,7 @@ test_k8s_rbac() {
   fi
 
   local result
-  result="$(kubectl --kubeconfig="${K8S_KUBECONFIG}" "${K8S_RBAC_OPTS[@]}" \
+  result="$(KUBECONFIG=/dev/null kubectl "${K8S_RBAC_BASE_ARGS[@]}" \
     --token="${token}" "${can_i_args[@]}" 2>/dev/null || true)"
   result="${result%%$'\n'*}"  # first line only
   result="${result// /}"       # trim spaces
@@ -653,6 +722,16 @@ VIEWER_TOKEN="$(get_user_token "${VIEWER_USER}" "${USERS_PASSWORD}")"
 [[ -n "${ADMIN_TOKEN}" ]]  && pass "Token for ${ADMIN_USER}"  || fail "Failed to get token for ${ADMIN_USER}"
 [[ -n "${DEV_TOKEN}" ]]    && pass "Token for ${DEV_USER}"    || fail "Failed to get token for ${DEV_USER}"
 [[ -n "${VIEWER_TOKEN}" ]] && pass "Token for ${VIEWER_USER}" || fail "Failed to get token for ${VIEWER_USER}"
+
+if [[ -n "${ADMIN_TOKEN}" ]]; then
+  log "JWT groups for ${ADMIN_USER}: $(token_groups_csv "${ADMIN_TOKEN}")"
+fi
+if [[ -n "${DEV_TOKEN}" ]]; then
+  log "JWT groups for ${DEV_USER}: $(token_groups_csv "${DEV_TOKEN}")"
+fi
+if [[ -n "${VIEWER_TOKEN}" ]]; then
+  log "JWT groups for ${VIEWER_USER}: $(token_groups_csv "${VIEWER_TOKEN}")"
+fi
 
 if [[ -n "${ADMIN_TOKEN}" ]]; then
   code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" -H "Authorization: Bearer ${ADMIN_TOKEN}" "${API_URL}/me" || true)"
