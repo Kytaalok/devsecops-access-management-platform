@@ -1,0 +1,93 @@
+# Кастомные ClusterRole для ролей из Keycloak.
+# Группы приходят в JWT с префиксом oidc: (настроено в k3s OIDC).
+#
+# Соответствие:
+#   Keycloak role "admin"     -> OIDC group "oidc:admin"     -> ClusterRole diploma:admin
+#   Keycloak role "developer" -> OIDC group "oidc:developer" -> ClusterRole diploma:developer
+#   Keycloak role "viewer"    -> OIDC group "oidc:viewer"    -> ClusterRole diploma:viewer
+
+---
+# diploma:admin — видит кластерные ресурсы (nodes, ns, PV).
+# Полный доступ к namespace-ресурсам выдаётся через RoleBinding (см. rbac-bindings.yaml).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: diploma:admin
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces", "persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+
+---
+# diploma:developer — деплой и мониторинг приложений.
+# Применяется через RoleBinding в конкретном namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: diploma:developer
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - pods/status
+      - services
+      - endpoints
+      - configmaps
+      - events
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+
+---
+# diploma:viewer — только чтение, без секретов и без записи.
+# Применяется через RoleBinding в конкретном namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: diploma:viewer
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - pods/status
+      - services
+      - endpoints
+      - configmaps
+      - events
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]

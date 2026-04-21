@@ -17,3 +17,5 @@ resources:
   - frontend-service.yaml
   - frontend-deployment.yaml
   - ingress.yaml
+  - rbac-clusterroles.yaml
+  - rbac-bindings.yaml

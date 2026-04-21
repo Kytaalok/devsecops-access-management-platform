@@ -1,0 +1,105 @@
+# Привязки OIDC-групп из Keycloak к ClusterRole/Role в Kubernetes.
+#
+# OIDC-группы формируются k3s из JWT-claim "groups" с префиксом "oidc:".
+# Пример: роль Keycloak "developer" -> группа k8s "oidc:developer".
+
+# ──────────────────────────────────────────────────────────────
+# ADMIN
+# ──────────────────────────────────────────────────────────────
+
+---
+# Кластерный уровень: admin видит nodes, namespaces, PV
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: diploma:admin-cluster
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+subjects:
+  - kind: Group
+    name: "oidc:admin"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: diploma:admin
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Namespace task-manager-api: admin получает полный контроль (встроенная роль admin)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: diploma:admin
+  namespace: task-manager-api
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+subjects:
+  - kind: Group
+    name: "oidc:admin"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: admin
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Namespace cicd (Jenkins): admin получает полный контроль
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: diploma:admin
+  namespace: cicd
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+subjects:
+  - kind: Group
+    name: "oidc:admin"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: admin
+  apiGroup: rbac.authorization.k8s.io
+
+# ──────────────────────────────────────────────────────────────
+# DEVELOPER
+# ──────────────────────────────────────────────────────────────
+
+---
+# Namespace task-manager-api: developer деплоит и мониторит, не трогает секреты
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: diploma:developer
+  namespace: task-manager-api
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+subjects:
+  - kind: Group
+    name: "oidc:developer"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: diploma:developer
+  apiGroup: rbac.authorization.k8s.io
+
+# ──────────────────────────────────────────────────────────────
+# VIEWER
+# ──────────────────────────────────────────────────────────────
+
+---
+# Namespace task-manager-api: viewer только читает, без секретов и без записи
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: diploma:viewer
+  namespace: task-manager-api
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+subjects:
+  - kind: Group
+    name: "oidc:viewer"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: diploma:viewer
+  apiGroup: rbac.authorization.k8s.io
