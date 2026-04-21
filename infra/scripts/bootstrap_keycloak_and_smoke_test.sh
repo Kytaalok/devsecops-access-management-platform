@@ -11,7 +11,7 @@ NAMESPACE="${NAMESPACE:-task-manager-api}"
 SERVER_IP="${SERVER_IP:-83.69.249.206}"
 JENKINS_NAMESPACE="${JENKINS_NAMESPACE:-cicd}"
 
-KEYCLOAK_URL="${KEYCLOAK_URL:-http://keycloak.${SERVER_IP}.nip.io}"
+KEYCLOAK_URL="${KEYCLOAK_URL:-https://keycloak.${SERVER_IP}.nip.io}"
 API_URL="${API_URL:-http://api.${SERVER_IP}.nip.io}"
 FRONTEND_URL="${FRONTEND_URL:-http://app.${SERVER_IP}.nip.io}"
 JENKINS_URL="${JENKINS_URL:-http://jenkins.${SERVER_IP}.nip.io}"
@@ -22,6 +22,9 @@ JENKINS_CLIENT_ID="${JENKINS_CLIENT_ID:-jenkins}"
 
 KEYCLOAK_ADMIN_USER="${KEYCLOAK_ADMIN_USER:-admin}"
 KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD:-admin}"
+KEYCLOAK_CA_CERT="${KEYCLOAK_CA_CERT:-/etc/rancher/k3s/keycloak-ca.crt}"
+KEYCLOAK_INSECURE_SKIP_VERIFY="${KEYCLOAK_INSECURE_SKIP_VERIFY:-false}"
+K8S_KUBECONFIG="${K8S_KUBECONFIG:-}"
 
 ADMIN_USER="${ADMIN_USER:-admin1}"
 DEV_USER="${DEV_USER:-dev1}"
@@ -66,13 +69,30 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 PASS_COUNT=0
 FAIL_COUNT=0
 
-log()  { printf '[INFO] %s\n' "$*"; }
+log()  { printf '[INFO] %s\n' "$*"  >&2; }
 pass() { printf '[PASS] %s\n' "$*"; PASS_COUNT=$((PASS_COUNT + 1)); }
 fail() { printf '[FAIL] %s\n' "$*"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 die()  { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"
+}
+
+KEYCLOAK_CURL_TLS_OPTS=()
+if [[ "${KEYCLOAK_URL}" == https://* ]]; then
+  if [[ -f "${KEYCLOAK_CA_CERT}" ]]; then
+    KEYCLOAK_CURL_TLS_OPTS+=(--cacert "${KEYCLOAK_CA_CERT}")
+    log "Using Keycloak CA cert: ${KEYCLOAK_CA_CERT}"
+  elif [[ "${KEYCLOAK_INSECURE_SKIP_VERIFY}" == "true" ]]; then
+    KEYCLOAK_CURL_TLS_OPTS+=(-k)
+    log "Keycloak TLS verify disabled (KEYCLOAK_INSECURE_SKIP_VERIFY=true)"
+  else
+    log "Keycloak CA cert not found (${KEYCLOAK_CA_CERT}), using system trust store"
+  fi
+fi
+
+kc_curl() {
+  curl -sS "${KEYCLOAK_CURL_TLS_OPTS[@]}" "$@"
 }
 
 request() {
@@ -82,7 +102,6 @@ request() {
   local token="${4:-}"
   local content_type="${5:-application/json}"
   local args=(
-    -sS
     -o "${REQ_BODY}"
     -w "%{http_code}"
     -X "${method}"
@@ -96,12 +115,12 @@ request() {
     args+=(-H "Content-Type: ${content_type}" --data "${data}")
   fi
 
-  curl "${args[@]}" || true
+  kc_curl "${args[@]}" || true
 }
 
 get_admin_token() {
   local body
-  body="$(curl -sS -X POST \
+  body="$(kc_curl -X POST \
     "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
@@ -115,7 +134,7 @@ get_user_token() {
   local username="$1"
   local password="$2"
   local body
-  body="$(curl -sS -X POST \
+  body="$(kc_curl -X POST \
     "${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/token" \
     -H "Content-Type: application/x-www-form-urlencoded" \
     --data-urlencode "grant_type=password" \
@@ -144,7 +163,7 @@ ensure_realm() {
 # Returns the internal UUID of the client via stdout
 ensure_client() {
   local clients_json client_internal_id
-  clients_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  clients_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}")"
   client_internal_id="$(jq -r '.[0].id // empty' <<<"${clients_json}")"
 
@@ -166,14 +185,14 @@ ensure_client() {
     [[ "${code}" == "201" ]] || die "Failed to create client '${CLIENT_ID}' (HTTP ${code})"
     log "Client '${CLIENT_ID}' created"
 
-    clients_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    clients_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
       "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}")"
     client_internal_id="$(jq -r '.[0].id // empty' <<<"${clients_json}")"
     [[ -n "${client_internal_id}" ]] || die "Client '${CLIENT_ID}' created but internal ID not found"
   fi
 
   local client_repr patched_repr code
-  client_repr="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  client_repr="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/clients/${client_internal_id}")"
   patched_repr="$(jq \
     '.enabled=true
@@ -196,7 +215,7 @@ ensure_mapper() {
   local mapper_json="$3"
 
   local existing_id
-  existing_id="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  existing_id="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/clients/${client_uuid}/protocol-mappers/models" \
     | jq -r --arg name "${mapper_name}" '.[] | select(.name==$name) | .id // empty')"
 
@@ -250,7 +269,7 @@ ensure_client_mappers() {
 
 ensure_jenkins_client() {
   local clients_json client_internal_id
-  clients_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  clients_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${JENKINS_CLIENT_ID}")"
   client_internal_id="$(jq -r '.[0].id // empty' <<<"${clients_json}")"
 
@@ -275,14 +294,14 @@ ensure_jenkins_client() {
     [[ "${code}" == "201" ]] || die "Failed to create client '${JENKINS_CLIENT_ID}' (HTTP ${code})"
     log "Client '${JENKINS_CLIENT_ID}' created"
 
-    clients_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    clients_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
       "${KEYCLOAK_URL}/admin/realms/${REALM}/clients?clientId=${JENKINS_CLIENT_ID}")"
     client_internal_id="$(jq -r '.[0].id // empty' <<<"${clients_json}")"
     [[ -n "${client_internal_id}" ]] || die "Client '${JENKINS_CLIENT_ID}' created but internal ID not found"
   fi
 
   local client_repr patched_repr code
-  client_repr="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  client_repr="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/clients/${client_internal_id}")"
   patched_repr="$(jq \
     --arg redirect "${JENKINS_REDIRECT_URI}" \
@@ -325,7 +344,7 @@ ensure_user_with_role() {
   local last_name="$5"
 
   local users_json user_id
-  users_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  users_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/users?username=${username}&exact=true")"
   user_id="$(jq -r '.[0].id // empty' <<<"${users_json}")"
 
@@ -342,7 +361,7 @@ ensure_user_with_role() {
 }')"
     code="$(request POST "${KEYCLOAK_URL}/admin/realms/${REALM}/users" "${payload}" "${KC_ADMIN_TOKEN}")"
     [[ "${code}" == "201" ]] || die "Failed to create user '${username}' (HTTP ${code})"
-    users_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    users_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
       "${KEYCLOAK_URL}/admin/realms/${REALM}/users?username=${username}&exact=true")"
     user_id="$(jq -r '.[0].id // empty' <<<"${users_json}")"
     [[ -n "${user_id}" ]] || die "User '${username}' created but ID not found"
@@ -374,7 +393,7 @@ ensure_user_with_role() {
   [[ "${code}" == "204" ]] || die "Failed to set password for '${username}' (HTTP ${code})"
 
   local role_json
-  role_json="$(curl -sS -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  role_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/roles/${role}")"
   [[ "$(jq -r '.name // empty' <<<"${role_json}")" == "${role}" ]] || die "Failed to fetch role '${role}' representation"
   code="$(request POST "${KEYCLOAK_URL}/admin/realms/${REALM}/users/${user_id}/role-mappings/realm" "[${role_json}]" "${KC_ADMIN_TOKEN}")"
@@ -400,9 +419,17 @@ test_http_code() {
   local code
 
   if [[ -n "${token}" ]]; then
-    code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" -H "Authorization: Bearer ${token}" "${url}" || true)"
+    if [[ "${url}" == "${KEYCLOAK_URL}"* ]]; then
+      code="$(kc_curl -o "${REQ_BODY}" -w "%{http_code}" -H "Authorization: Bearer ${token}" "${url}" || true)"
+    else
+      code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" -H "Authorization: Bearer ${token}" "${url}" || true)"
+    fi
   else
-    code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" "${url}" || true)"
+    if [[ "${url}" == "${KEYCLOAK_URL}"* ]]; then
+      code="$(kc_curl -o "${REQ_BODY}" -w "%{http_code}" "${url}" || true)"
+    else
+      code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" "${url}" || true)"
+    fi
   fi
 
   if [[ "${code}" == "${expected}" ]]; then
@@ -454,7 +481,7 @@ test_jenkins_oidc_redirect() {
 test_keycloak_auth_request_for_jenkins() {
   local encoded_redirect code
   encoded_redirect="$(jq -rn --arg v "${JENKINS_REDIRECT_URI}" '$v|@uri')"
-  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+  code="$(kc_curl -o "${REQ_BODY}" -w "%{http_code}" \
     "${KEYCLOAK_URL}/realms/${REALM}/protocol/openid-connect/auth?client_id=${JENKINS_CLIENT_ID}&redirect_uri=${encoded_redirect}&response_type=code&scope=openid&state=smoke&nonce=smoke" || true)"
 
   if grep -qi "Invalid parameter: redirect_uri" "${REQ_BODY}"; then
@@ -486,13 +513,26 @@ test_postgres_query() {
 
 K8S_RBAC_OPTS=()
 if [[ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]]; then
+  K8S_KUBECONFIG="/dev/null"
   K8S_RBAC_OPTS=(
     "--server=https://kubernetes.default.svc"
     "--certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
   )
-  log "Running inside pod — using in-cluster k8s API"
+  log "Running inside pod - using in-cluster k8s API"
 else
-  log "Running outside pod — using default kubeconfig for k8s API"
+  if [[ -z "${K8S_KUBECONFIG}" ]]; then
+    if [[ -n "${KUBECONFIG:-}" ]]; then
+      K8S_KUBECONFIG="${KUBECONFIG}"
+    elif [[ -f /etc/rancher/k3s/k3s.yaml ]]; then
+      K8S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+    else
+      K8S_KUBECONFIG="${HOME}/.kube/config"
+    fi
+  fi
+  if [[ "${K8S_KUBECONFIG}" != *:* && ! -f "${K8S_KUBECONFIG}" ]]; then
+    die "kubeconfig for RBAC checks not found: ${K8S_KUBECONFIG}"
+  fi
+  log "Running outside pod - using kubeconfig for k8s API: ${K8S_KUBECONFIG}"
 fi
 
 test_clusterrole_exists() {
@@ -542,7 +582,7 @@ test_k8s_rbac() {
   fi
 
   local result
-  result="$(KUBECONFIG=/dev/null kubectl "${K8S_RBAC_OPTS[@]}" \
+  result="$(kubectl --kubeconfig="${K8S_KUBECONFIG}" "${K8S_RBAC_OPTS[@]}" \
     --token="${token}" "${can_i_args[@]}" 2>/dev/null || true)"
   result="${result%%$'\n'*}"  # first line only
   result="${result// /}"       # trim spaces
@@ -710,10 +750,10 @@ test_clusterrole_exists "diploma:admin"
 test_clusterrole_exists "diploma:developer"
 test_clusterrole_exists "diploma:viewer"
 test_clusterrolebinding_exists "diploma:admin-cluster"
-test_rolebinding_exists "diploma:admin-task-manager-api" "${NAMESPACE}"
-test_rolebinding_exists "diploma:admin-cicd" "${JENKINS_NAMESPACE}"
-test_rolebinding_exists "diploma:developer-task-manager-api" "${NAMESPACE}"
-test_rolebinding_exists "diploma:viewer-task-manager-api" "${NAMESPACE}"
+test_rolebinding_exists "diploma:admin" "${NAMESPACE}"
+test_rolebinding_exists "diploma:admin" "${JENKINS_NAMESPACE}"
+test_rolebinding_exists "diploma:developer" "${NAMESPACE}"
+test_rolebinding_exists "diploma:viewer" "${NAMESPACE}"
 
 log "  Testing admin OIDC token k8s access (oidc:admin -> diploma:admin)..."
 # admin can get nodes (cluster-wide, diploma:admin ClusterRole)
@@ -730,7 +770,7 @@ test_k8s_rbac "admin: delete pods in ${NAMESPACE}" "${ADMIN_TOKEN}" "yes" "delet
 test_k8s_rbac "admin: get pods in ${JENKINS_NAMESPACE}" "${ADMIN_TOKEN}" "yes" "get" "pods" "${JENKINS_NAMESPACE}"
 
 log "  Testing developer OIDC token k8s access (oidc:developer -> diploma:developer)..."
-# developer CANNOT get nodes (cluster-wide — no ClusterRoleBinding to admin)
+# developer CANNOT get nodes (cluster-wide - no ClusterRoleBinding to admin)
 test_k8s_rbac "developer: get nodes (denied)" "${DEV_TOKEN}" "no" "get" "nodes"
 # developer CAN get pods in task-manager-api (diploma:developer allows it)
 test_k8s_rbac "developer: get pods in ${NAMESPACE}" "${DEV_TOKEN}" "yes" "get" "pods" "${NAMESPACE}"
