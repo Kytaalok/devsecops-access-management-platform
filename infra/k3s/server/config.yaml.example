@@ -1,0 +1,22 @@
+# /etc/rancher/k3s/config.yaml
+# Конфигурация k3s-сервера с OIDC-аутентификацией через Keycloak.
+#
+# Установка:
+#   sudo cp infra/k3s/server/config.yaml.example /etc/rancher/k3s/config.yaml
+#   #   sudo cp infra/tls/ca.crt /etc/rancher/k3s/keycloak-ca.crt
+#   sudo systemctl restart k3s
+
+kube-apiserver-arg:
+  # OIDC-провайдер — Keycloak realm devsecops (HTTPS через Traefik)
+  - "oidc-issuer-url=https://keycloak.<SERVER_IP>.nip.io/realms/devsecops"
+  # Client ID совпадает с aud-claim в JWT
+  - "oidc-client-id=task-manager-api"
+  # Claim для имени пользователя в Kubernetes
+  - "oidc-username-claim=preferred_username"
+  # Claim с массивом ролей (добавлен mapper realm-roles-groups в Keycloak)
+  - "oidc-groups-claim=groups"
+  # Префиксы исключают коллизии со встроенными пользователями/группами k8s
+  - "oidc-username-prefix=oidc:"
+  - "oidc-groups-prefix=oidc:"
+  # CA самоподписанного сертификата Keycloak
+  - "oidc-ca-file=/etc/rancher/k3s/keycloak-ca.crt"

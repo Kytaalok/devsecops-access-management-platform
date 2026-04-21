@@ -10,8 +10,10 @@ resources:
   - postgres-secret.yaml
   - postgres-service.yaml
   - postgres-statefulset.yaml
+  - keycloak-secret.yaml
   - keycloak-service.yaml
   - keycloak-deployment.yaml
+  - keycloak-ingress-tls.yaml
   - frontend-service.yaml
   - frontend-deployment.yaml
   - ingress.yaml

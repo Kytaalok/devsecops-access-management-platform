@@ -18,13 +18,21 @@ venv/
 Thumbs.db
 .DS_Store
 
-# Infra secrets
+# Infra secrets 
 infra/k3s/base/api-secret.yaml
 infra/k3s/base/postgres-secret.yaml
+infra/k3s/base/keycloak-secret.yaml
+infra/k3s/base/keycloak-tls-secret.yaml
 infra/k3s/jenkins/secrets/*.env
+
+# TLS-certs & keys
+infra/tls/
+*.key
+*.crt
+*.pem
+!*.example.*
 
 # Reports
 reports/
 gitleaks-report.json
 *.sarif
-
