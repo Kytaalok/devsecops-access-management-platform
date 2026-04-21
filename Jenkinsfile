@@ -27,49 +27,26 @@ pipeline {
       }
     }
 
-    stage('Gitleaks') {
+    stage('Gitleaks (Docker)') {
       steps {
         sh '''
           set -euo pipefail
           mkdir -p reports
 
-          run_scan() {
-            "$1" git . \
-              --redact \
-              --report-format sarif \
-              --report-path reports/gitleaks.sarif \
-              --exit-code 1
-          }
-
-          if command -v gitleaks >/dev/null 2>&1; then
-            echo "[INFO] Using installed gitleaks binary"
-            run_scan "$(command -v gitleaks)"
-            exit 0
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "[ERROR] Docker is required for Gitleaks stage"
+            exit 1
           fi
 
-          if command -v docker >/dev/null 2>&1; then
-            echo "[INFO] Using gitleaks docker image"
-            docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v${GITLEAKS_VERSION} \
+          docker run --rm \
+            -v "$PWD:/repo" \
+            -w /repo \
+            ghcr.io/gitleaks/gitleaks:v${GITLEAKS_VERSION} \
               gitleaks git . \
                 --redact \
                 --report-format sarif \
                 --report-path reports/gitleaks.sarif \
                 --exit-code 1
-            exit 0
-          fi
-
-          echo "[INFO] Downloading gitleaks binary"
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64|amd64) ASSET_ARCH="x64" ;;
-            aarch64|arm64) ASSET_ARCH="arm64" ;;
-            *) echo "[ERROR] Unsupported architecture: $ARCH"; exit 1 ;;
-          esac
-
-          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${ASSET_ARCH}.tar.gz" \
-            | tar -xz -C . gitleaks
-          chmod +x ./gitleaks
-          run_scan "./gitleaks"
         '''
       }
       post {
@@ -79,22 +56,29 @@ pipeline {
       }
     }
 
-    stage('Semgrep') {
+    stage('Semgrep (Docker)') {
       steps {
         sh '''
           set -euo pipefail
           mkdir -p reports
-          export PATH="$HOME/.local/bin:$PATH"
 
-          if ! command -v semgrep >/dev/null 2>&1; then
-            echo "[INFO] Installing semgrep (no docker)"
-            python3 -m pip install --user "semgrep==${SEMGREP_VERSION}"
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "[ERROR] Docker is required for Semgrep stage"
+            exit 1
           fi
 
           if [ "${SEMGREP_STRICT}" = "true" ]; then
-            semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
+            docker run --rm \
+              -v "$PWD:/src" \
+              -w /src \
+              returntocorp/semgrep:${SEMGREP_VERSION} \
+                semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
           else
-            semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
+            docker run --rm \
+              -v "$PWD:/src" \
+              -w /src \
+              returntocorp/semgrep:${SEMGREP_VERSION} \
+                semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
           fi
         '''
       }
@@ -104,7 +88,6 @@ pipeline {
         }
       }
     }
-
 
     stage('Smoke Test') {
       when {
