@@ -10,30 +10,26 @@ controller:
       keyName: jenkins-admin-user
     - name: jenkins-admin-secret
       keyName: jenkins-admin-password
-
-  JCasC:
-    securityRealm: |-
-      local:
-        allowsSignup: false
-        enableCaptcha: false
-        users:
-          - id: "${jenkins-admin-secret-jenkins-admin-user}"
-            name: "Jenkins Admin"
-            password: "${jenkins-admin-secret-jenkins-admin-password}"
-    authorizationStrategy: |-
-      loggedInUsersCanDoAnything:
-        allowAnonymousRead: false
+    - name: jenkins-oidc
+      keyName: client-id
+    - name: jenkins-oidc
+      keyName: client-secret
 
   serviceType: ClusterIP
+  jenkinsUrl: "http://jenkins.83.69.249.206.nip.io"
+
   ingress:
     enabled: true
     ingressClassName: traefik
     hostName: jenkins.83.69.249.206.nip.io
     path: /
+
   persistence:
     enabled: true
     storageClass: local-path
     size: 20Gi
+
+  installLatestPlugins: false
   installPlugins:
     - kubernetes
     - workflow-aggregator
@@ -41,7 +37,41 @@ controller:
     - credentials-binding
     - ssh-agent
     - configuration-as-code
+    - role-strategy
+    - oic-auth
+
+  JCasC:
+    securityRealm: |-
+      oic:
+        serverConfiguration:
+          wellKnown:
+            wellKnownOpenIDConfigurationUrl: "http://keycloak.83.69.249.206.nip.io/realms/devsecops/.well-known/openid-configuration"
+            scopesOverride: "openid profile email "
+        clientId: "${jenkins-oidc-client-id}"
+        clientSecret: "${jenkins-oidc-client-secret}"
+
+        userNameField: "preferred_username"
+        fullNameFieldName: "name"
+        emailFieldName: "email"
+
+        logoutFromOpenidProvider: true
+        rootURLFromRequest: false
+        postLogoutRedirectUrl: "http://jenkins.83.69.249.206.nip.io/login"
+
+        allowTokenAccessWithoutOicSession: false
+        disableSslVerification: false
+        tokenExpirationCheckDisabled: false
+
+        properties:
+          - pkce
+          - escapeHatch:
+              username: "${jenkins-admin-secret-jenkins-admin-user}"
+              secret: "${jenkins-admin-secret-jenkins-admin-password}"
+              group: "jenkins-admins"
+
+    authorizationStrategy: |-
+      loggedInUsersCanDoAnything:
+        allowAnonymousRead: false
 
 agent:
   enabled: true
-
