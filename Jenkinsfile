@@ -1,6 +1,6 @@
 pipeline {
   agent any
-  
+
   options {
     disableConcurrentBuilds()
     buildDiscarder(logRotator(numToKeepStr: '20'))
@@ -17,7 +17,7 @@ pipeline {
 
   environment {
     GITLEAKS_VERSION = '8.30.0'
-    SEMGREP_VERSION  = '1.91.0'
+    SEMGREP_VERSION  = '1.93.0'
   }
 
   stages {
@@ -85,15 +85,23 @@ pipeline {
           set -euo pipefail
           mkdir -p reports
 
-          run_semgrep_local() {
+          run_semgrep_bin() {
+            BIN="$1"
             if [ "${SEMGREP_STRICT}" = "true" ]; then
-              semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
+              "$BIN" scan --config auto --metrics=off --json --output reports/semgrep.json .
             else
-              semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
+              "$BIN" scan --config auto --metrics=off --json --output reports/semgrep.json . || true
             fi
           }
 
-          run_semgrep_docker() {
+          if command -v semgrep >/dev/null 2>&1; then
+            echo "[INFO] Using installed semgrep"
+            run_semgrep_bin "$(command -v semgrep)"
+            exit 0
+          fi
+
+          if command -v docker >/dev/null 2>&1; then
+            echo "[INFO] Using semgrep docker image"
             if [ "${SEMGREP_STRICT}" = "true" ]; then
               docker run --rm -v "$PWD:/src" -w /src --entrypoint semgrep semgrep/semgrep:${SEMGREP_VERSION} \
                 scan --config auto --metrics=off --json --output reports/semgrep.json .
@@ -101,22 +109,23 @@ pipeline {
               docker run --rm -v "$PWD:/src" -w /src --entrypoint semgrep semgrep/semgrep:${SEMGREP_VERSION} \
                 scan --config auto --metrics=off --json --output reports/semgrep.json . || true
             fi
-          }
-
-          if command -v semgrep >/dev/null 2>&1; then
-            echo "[INFO] Using installed semgrep"
-            run_semgrep_local
             exit 0
           fi
 
-          if command -v docker >/dev/null 2>&1; then
-            echo "[INFO] Using semgrep docker image"
-            run_semgrep_docker
-            exit 0
-          fi
+          echo "[INFO] Downloading semgrep binary"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64|amd64) ASSET_ARCH="x86_64" ;;
+            aarch64|arm64) ASSET_ARCH="aarch64" ;;
+            *) echo "[ERROR] Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
 
-          echo "[ERROR] Neither semgrep nor docker found on agent"
-          exit 1
+          curl -fsSL "https://github.com/semgrep/semgrep/releases/download/v${SEMGREP_VERSION}/semgrep-core_manylinux_${ASSET_ARCH}" -o semgrep-core
+          curl -fsSL "https://github.com/semgrep/semgrep/releases/download/v${SEMGREP_VERSION}/semgrep_manylinux_${ASSET_ARCH}" -o semgrep
+          chmod +x semgrep semgrep-core
+          export SEMGREP_CORE_BIN="$PWD/semgrep-core"
+
+          run_semgrep_bin "$PWD/semgrep"
         '''
       }
       post {
