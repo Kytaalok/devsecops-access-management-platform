@@ -17,7 +17,7 @@ pipeline {
 
   environment {
     GITLEAKS_VERSION = '8.30.0'
-    SEMGREP_VERSION  = '1.93.0'
+    SEMGREP_VERSION  = '1.160.0'
   }
 
   stages {
@@ -84,48 +84,18 @@ pipeline {
         sh '''
           set -euo pipefail
           mkdir -p reports
+          export PATH="$HOME/.local/bin:$PATH"
 
-          run_semgrep_bin() {
-            BIN="$1"
-            if [ "${SEMGREP_STRICT}" = "true" ]; then
-              "$BIN" scan --config auto --metrics=off --json --output reports/semgrep.json .
-            else
-              "$BIN" scan --config auto --metrics=off --json --output reports/semgrep.json . || true
-            fi
-          }
-
-          if command -v semgrep >/dev/null 2>&1; then
-            echo "[INFO] Using installed semgrep"
-            run_semgrep_bin "$(command -v semgrep)"
-            exit 0
+          if ! command -v semgrep >/dev/null 2>&1; then
+            echo "[INFO] Installing semgrep (no docker)"
+            python3 -m pip install --user "semgrep==${SEMGREP_VERSION}"
           fi
 
-          if command -v docker >/dev/null 2>&1; then
-            echo "[INFO] Using semgrep docker image"
-            if [ "${SEMGREP_STRICT}" = "true" ]; then
-              docker run --rm -v "$PWD:/src" -w /src --entrypoint semgrep semgrep/semgrep:${SEMGREP_VERSION} \
-                scan --config auto --metrics=off --json --output reports/semgrep.json .
-            else
-              docker run --rm -v "$PWD:/src" -w /src --entrypoint semgrep semgrep/semgrep:${SEMGREP_VERSION} \
-                scan --config auto --metrics=off --json --output reports/semgrep.json . || true
-            fi
-            exit 0
+          if [ "${SEMGREP_STRICT}" = "true" ]; then
+            semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
+          else
+            semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
           fi
-
-          echo "[INFO] Downloading semgrep binary"
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64|amd64) ASSET_ARCH="x86_64" ;;
-            aarch64|arm64) ASSET_ARCH="aarch64" ;;
-            *) echo "[ERROR] Unsupported architecture: $ARCH"; exit 1 ;;
-          esac
-
-          curl -fsSL "https://github.com/semgrep/semgrep/releases/download/v${SEMGREP_VERSION}/semgrep-core_manylinux_${ASSET_ARCH}" -o semgrep-core
-          curl -fsSL "https://github.com/semgrep/semgrep/releases/download/v${SEMGREP_VERSION}/semgrep_manylinux_${ASSET_ARCH}" -o semgrep
-          chmod +x semgrep semgrep-core
-          export SEMGREP_CORE_BIN="$PWD/semgrep-core"
-
-          run_semgrep_bin "$PWD/semgrep"
         '''
       }
       post {
@@ -134,6 +104,7 @@ pipeline {
         }
       }
     }
+
 
     stage('Smoke Test') {
       when {
