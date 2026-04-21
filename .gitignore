@@ -20,3 +20,4 @@ Thumbs.db
 
 infra/k3s/base/api-secret.yaml
 infra/k3s/base/postgres-secret.yaml
+infra/k3s/jenkins/secrets/*.env

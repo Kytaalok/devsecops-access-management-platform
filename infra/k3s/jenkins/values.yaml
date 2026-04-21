@@ -1,0 +1,47 @@
+controller:
+  admin:
+    createSecret: false
+    existingSecret: jenkins-admin-secret
+    userKey: jenkins-admin-user
+    passwordKey: jenkins-admin-password
+
+  additionalExistingSecrets:
+    - name: jenkins-admin-secret
+      keyName: jenkins-admin-user
+    - name: jenkins-admin-secret
+      keyName: jenkins-admin-password
+
+  JCasC:
+    securityRealm: |-
+      local:
+        allowsSignup: false
+        enableCaptcha: false
+        users:
+          - id: "${jenkins-admin-secret-jenkins-admin-user}"
+            name: "Jenkins Admin"
+            password: "${jenkins-admin-secret-jenkins-admin-password}"
+    authorizationStrategy: |-
+      loggedInUsersCanDoAnything:
+        allowAnonymousRead: false
+
+  serviceType: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostName: jenkins.83.69.249.206.nip.io
+    path: /
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 20Gi
+  installPlugins:
+    - kubernetes
+    - workflow-aggregator
+    - git
+    - credentials-binding
+    - ssh-agent
+    - configuration-as-code
+
+agent:
+  enabled: true
+
