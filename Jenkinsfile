@@ -9,17 +9,13 @@ spec:
   containers:
     - name: gitleaks
       image: ghcr.io/gitleaks/gitleaks:v8.30.0
-      command:
-        - sleep
-      args:
-        - "99d"
+      command: ["sleep"]
+      args: ["99d"]
       tty: true
     - name: semgrep
       image: returntocorp/semgrep:1.160.0
-      command:
-        - sleep
-      args:
-        - "99d"
+      command: ["sleep"]
+      args: ["99d"]
       tty: true
 '''
     }
@@ -37,6 +33,10 @@ spec:
     string(name: 'SERVER_IP', defaultValue: '83.69.249.206', description: 'Публичный IP VPS/стенда')
     string(name: 'NAMESPACE', defaultValue: 'task-manager-api', description: 'Namespace приложения')
     string(name: 'JENKINS_NAMESPACE', defaultValue: 'cicd', description: 'Namespace Jenkins')
+  }
+
+  environment {
+    SEMGREP_CONFIG = 'p/ci'
   }
 
   stages {
@@ -75,9 +75,9 @@ spec:
             mkdir -p reports
 
             if [ "${SEMGREP_STRICT}" = "true" ]; then
-              semgrep scan --config auto --metrics=off --json --output reports/semgrep.json .
+              semgrep scan --config "${SEMGREP_CONFIG}" --metrics=off --json --output reports/semgrep.json .
             else
-              semgrep scan --config auto --metrics=off --json --output reports/semgrep.json . || true
+              semgrep scan --config "${SEMGREP_CONFIG}" --metrics=off --json --output reports/semgrep.json . || true
             fi
           '''
         }
