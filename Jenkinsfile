@@ -6,6 +6,7 @@ pipeline {
 apiVersion: v1
 kind: Pod
 spec:
+  serviceAccountName: jenkins
   containers:
     - name: gitleaks
       image: ghcr.io/gitleaks/gitleaks:v8.30.0
@@ -22,6 +23,11 @@ spec:
       command: ["sleep"]
       args: ["99d"]
       tty: true
+    - name: kubectl
+      image: alpine/k8s:1.30.4
+      command: ["sleep"]
+      args: ["99d"]
+      tty: true
 '''
     }
   }
@@ -33,7 +39,7 @@ spec:
   }
 
   parameters {
-    booleanParam(name: 'RUN_SMOKE_TEST', defaultValue: false, description: 'Запустить infra/scripts/bootstrap_keycloak_and_smoke_test.sh')
+    booleanParam(name: 'RUN_SMOKE_TEST', defaultValue: false, description: 'Запустить bootstrap + smoke + RBAC тесты')
     booleanParam(name: 'SEMGREP_STRICT', defaultValue: false, description: 'Падать, если Semgrep нашел проблемы')
     booleanParam(name: 'TRIVY_STRICT', defaultValue: false, description: 'Падать, если Trivy нашел HIGH/CRITICAL')
     string(name: 'TRIVY_SEVERITY', defaultValue: 'HIGH,CRITICAL', description: 'Уровни уязвимостей для Trivy')
@@ -80,7 +86,6 @@ spec:
           sh '''
             set -euo pipefail
             mkdir -p reports
-
             if [ "${SEMGREP_STRICT}" = "true" ]; then
               semgrep scan --config "${SEMGREP_CONFIG}" --metrics=off --json --output reports/semgrep.json .
             else
@@ -102,8 +107,6 @@ spec:
           sh '''
             set -euo pipefail
             mkdir -p reports .trivycache
-
-            # 1) Всегда формируем SARIF-отчет 
             trivy fs . \
               --cache-dir .trivycache \
               --no-progress \
@@ -112,8 +115,6 @@ spec:
               --severity "${TRIVY_SEVERITY}" \
               --scanners vuln,secret \
               --exit-code 0
-
-            # 2) Гейт только если strict=true
             if [ "${TRIVY_STRICT}" = "true" ]; then
               trivy fs . \
                 --cache-dir .trivycache \
@@ -133,18 +134,26 @@ spec:
       }
     }
 
-    stage('Smoke Test') {
+    stage('Smoke + RBAC Test') {
       when {
         expression { return params.RUN_SMOKE_TEST }
       }
       steps {
-        sh '''
-          set -euo pipefail
-          export SERVER_IP="${SERVER_IP}"
-          export NAMESPACE="${NAMESPACE}"
-          export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
-          bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh
-        '''
+        container('kubectl') {
+          sh '''
+            set -euo pipefail
+            mkdir -p reports
+            export SERVER_IP="${SERVER_IP}"
+            export NAMESPACE="${NAMESPACE}"
+            export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
+            bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh 2>&1 | tee reports/smoke-test.log
+          '''
+        }
+      }
+      post {
+        always {
+          archiveArtifacts artifacts: 'reports/smoke-test.log', allowEmptyArchive: true
+        }
       }
     }
   }

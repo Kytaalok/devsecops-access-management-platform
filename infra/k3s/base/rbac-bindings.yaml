@@ -103,3 +103,45 @@ roleRef:
   kind: ClusterRole
   name: diploma:viewer
   apiGroup: rbac.authorization.k8s.io
+
+# ──────────────────────────────────────────────────────────────
+# JENKINS SMOKE TEST
+# Позволяет Jenkins SA (ns cicd) выполнять smoke-тесты в task-manager-api:
+# rollout status, get endpoints/secrets, exec в postgres pod.
+# ──────────────────────────────────────────────────────────────
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: diploma:jenkins-smoke
+  namespace: task-manager-api
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "endpoints", "secrets", "services"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: diploma:jenkins-smoke
+  namespace: task-manager-api
+  labels:
+    app.kubernetes.io/part-of: diploma-rbac
+subjects:
+  - kind: ServiceAccount
+    name: jenkins
+    namespace: cicd
+roleRef:
+  kind: Role
+  name: diploma:jenkins-smoke
+  apiGroup: rbac.authorization.k8s.io
