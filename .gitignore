@@ -36,3 +36,4 @@ infra/tls/
 reports/
 gitleaks-report.json
 *.sarif
+infra/k3s/monitoring/secrets/grafana-admin.env

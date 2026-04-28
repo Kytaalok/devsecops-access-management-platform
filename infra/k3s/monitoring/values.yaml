@@ -1,0 +1,139 @@
+# kube-prometheus-stack Helm values
+# Устанавливается скриптом: infra/scripts/install-monitoring.sh
+
+# ── Grafana ───────────────────────────────────────────────────────────────────
+grafana:
+  # adminPassword задаётся через --set из infra/k3s/monitoring/secrets/grafana-admin.env
+  # adminPassword: "see install-monitoring.sh"
+
+  defaultDashboardsTimezone: Europe/Moscow
+
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 2Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      traefik.ingress.kubernetes.io/router.tls: "true"
+    hosts:
+      - grafana.83.69.249.206.nip.io
+    tls:
+      - secretName: grafana-tls-secret
+        hosts:
+          - grafana.83.69.249.206.nip.io
+
+  # Grafana dashboards — auto-provisioned
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+
+  # Provisioned dashboards из grafana.com
+  dashboards:
+    default:
+      # Kubernetes cluster overview
+      kubernetes-cluster:
+        gnetId: 7249
+        revision: 1
+        datasource: Prometheus
+      # Node Exporter Full
+      node-exporter:
+        gnetId: 1860
+        revision: 37
+        datasource: Prometheus
+      # FastAPI / HTTP metrics
+      fastapi-observability:
+        gnetId: 16110
+        revision: 1
+        datasource: Prometheus
+
+# ── Prometheus ────────────────────────────────────────────────────────────────
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: "8GiB"
+
+    # Мониторим ServiceMonitor из всех namespace
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+# ── AlertManager ─────────────────────────────────────────────────────────────
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+# ── Node Exporter ─────────────────────────────────────────────────────────────
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+# ── kube-state-metrics ────────────────────────────────────────────────────────
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
