@@ -15,10 +15,12 @@ spec:
       labels:
         app: frontend
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull-secret
       containers:
         - name: frontend
-          image: task-manager-frontend:dev
-          imagePullPolicy: Never
+          image: ghcr.io/kytaalok/task-manager-frontend:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 80

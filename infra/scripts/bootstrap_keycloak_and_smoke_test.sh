@@ -411,8 +411,6 @@ ensure_user_with_role() {
   code="$(request PUT "${KEYCLOAK_URL}/admin/realms/${REALM}/users/${user_id}/reset-password" "${pass_payload}" "${KC_ADMIN_TOKEN}")"
   [[ "${code}" == "204" ]] || die "Failed to set password for '${username}' (HTTP ${code})"
 
-  # Keep only one diploma realm-role per user to avoid privilege leaks
-  # from previous runs (e.g. developer/viewer still having admin).
   local user_roles_json removable_roles_json removable_count
   user_roles_json="$(kc_curl -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
     "${KEYCLOAK_URL}/admin/realms/${REALM}/users/${user_id}/role-mappings/realm")"
