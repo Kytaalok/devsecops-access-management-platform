@@ -1,0 +1,128 @@
+# grafana/loki-stack Helm values
+# Устанавливается скриптом: infra/scripts/install-loki.sh
+
+# ── Loki ─────────────────────────────────────────────────────────────────────
+loki:
+  enabled: true
+
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 5Gi
+
+  config:
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9096
+
+    ingester:
+      lifecycler:
+        ring:
+          kvstore:
+            store: inmemory
+          replication_factor: 1
+      chunk_idle_period: 5m
+      chunk_retain_period: 30s
+      max_transfer_retries: 0
+      wal:
+        enabled: false
+
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 24h
+
+    storage_config:
+      boltdb_shipper:
+        active_index_directory: /data/loki/boltdb-shipper-active
+        cache_location: /data/loki/boltdb-shipper-cache
+        cache_ttl: 24h
+        shared_store: filesystem
+      filesystem:
+        directory: /data/loki/chunks
+
+    compactor:
+      working_directory: /data/loki/boltdb-shipper-compactor
+      shared_store: filesystem
+      retention_enabled: true
+
+    limits_config:
+      enforce_metric_name: false
+      reject_old_samples: true
+      reject_old_samples_max_age: 168h
+      retention_period: 168h
+      ingestion_rate_mb: 4
+      ingestion_burst_size_mb: 6
+      max_streams_per_user: 1000
+      max_entries_limit_per_query: 5000
+
+    chunk_store_config:
+      max_look_back_period: 0s
+
+    table_manager:
+      retention_deletes_enabled: true
+      retention_period: 168h
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+# ── Promtail ──────────────────────────────────────────────────────────────────
+promtail:
+  enabled: true
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+  config:
+    logLevel: info
+    serverPort: 3101
+    clients:
+      - url: http://loki-stack:3100/loki/api/v1/push
+
+    snippets:
+      # CRI-парсинг + маркировка security-событий лейблами
+      pipelineStages:
+        - cri: {}
+
+        # Keycloak: извлечь тип события (LOGIN_ERROR, ACCESS_DENIED, ...)
+        - match:
+            selector: '{app="keycloak"}'
+            stages:
+              - regex:
+                  expression: 'type=(?P<kc_event>[A-Z_]+)'
+              - labels:
+                  kc_event:
+
+        # API: извлечь HTTP-статус из access log uvicorn
+        - match:
+            selector: '{app="api"}'
+            stages:
+              - regex:
+                  expression: '"(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS) [^ ]+ HTTP/[0-9.]+" (?P<http_status>[0-9]{3})'
+              - labels:
+                  http_status:
+
+# ── Grafana: отключаем — используем из kube-prometheus-stack ─────────────────
+grafana:
+  enabled: false
+
+# ── Fluent Bit: не нужен ──────────────────────────────────────────────────────
+fluent-bit:
+  enabled: false

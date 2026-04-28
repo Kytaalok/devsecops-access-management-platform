@@ -1,0 +1,199 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-security-logs-dashboard
+  namespace: monitoring
+  labels:
+    # Grafana sidecar подхватывает ConfigMap с дашбордом
+    grafana_dashboard: "1"
+data:
+  security-logs.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 10,
+          "title": "🔐 Keycloak — Аутентификация и Авторизация",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "loki", "uid": "loki"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+          "id": 1,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "{namespace=\"task-manager-api\", app=\"keycloak\"} |~ `(?i)(LOGIN_ERROR|ACCESS_DENIED|invalid_grant|unauthorized_client|LOGOUT_ERROR|REFRESH_TOKEN_ERROR|REGISTER_ERROR|RESET_PASSWORD_ERROR|REVOKE_GRANT_ERROR)`",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "❌ Keycloak — Отказы аутентификации / Access Denied",
+          "type": "logs"
+        },
+        {
+          "datasource": {"type": "loki", "uid": "loki"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+          "id": 2,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "{namespace=\"task-manager-api\", app=\"keycloak\"} |~ `type=(LOGIN|CODE_TO_TOKEN|TOKEN_REFRESH|LOGOUT) ` !~ `_ERROR`",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "✅ Keycloak — Успешные входы и выдача токенов",
+          "type": "logs"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+          "id": 11,
+          "title": "🌐 Task Manager API — HTTP-безопасность",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "loki", "uid": "loki"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+          "id": 3,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "{namespace=\"task-manager-api\", app=\"api\"} |~ `\" (401|403) `",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "🚫 API — HTTP 401 Unauthorized / 403 Forbidden",
+          "type": "logs"
+        },
+        {
+          "datasource": {"type": "loki", "uid": "loki"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+          "id": 6,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "{namespace=\"task-manager-api\", app=\"api\"} |~ `\" (2[0-9]{2}|201) `",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "✅ API — Успешные запросы (2xx)",
+          "type": "logs"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+          "id": 12,
+          "title": "⚙️ CI/CD (Jenkins) — Pipeline и Security Scans",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "loki", "uid": "loki"},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 19},
+          "id": 4,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "{namespace=\"cicd\"} |~ `(?i)(Started by|Finished:|SUCCESS|FAILURE|UNSTABLE|ABORTED|trivy|gitleaks|semgrep|image scan|Rolled out)`",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "⚙️ Jenkins — Запуски Pipeline и результаты сканирований",
+          "type": "logs"
+        },
+        {
+          "datasource": {"type": "loki", "uid": "loki"},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 19},
+          "id": 5,
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "prettifyLogMessage": false,
+            "showCommonLabels": false,
+            "showLabels": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": true
+          },
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "loki"},
+              "expr": "{namespace=\"task-manager-api\"} |~ `(?i)(Error|Failed|CrashLoop|OOMKilled|BackOff|denied|forbidden|panic)`",
+              "legendFormat": "",
+              "refId": "A"
+            }
+          ],
+          "title": "⚠️ Kubernetes — Ошибки Pod'ов и отказы доступа",
+          "type": "logs"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "tags": ["security", "loki", "devsecops"],
+      "time": {"from": "now-1h", "to": "now"},
+      "timepicker": {},
+      "timezone": "Europe/Moscow",
+      "title": "Security Events — Auth, AuthZ & Access Logs",
+      "uid": "security-logs-v1",
+      "version": 1
+    }
