@@ -46,12 +46,7 @@ helm upgrade --install "${HELM_RELEASE}" grafana/loki-stack \
   --wait
 
 log "loki-stack deployed"
-
-# ── Patch Loki datasource: isDefault false (Prometheus остаётся default) ──────
-# loki-stack chart создаёт CM с isDefault: true — исправляем, чтобы не конфликтовало
-kubectl patch configmap loki-stack -n "${NAMESPACE}" --type merge -p \
-  '{"data":{"loki-stack-datasource.yaml":"apiVersion: 1\ndatasources:\n- name: Loki\n  type: loki\n  access: proxy\n  url: http://loki-stack:3100\n  version: 1\n  isDefault: false\n  uid: loki\n  jsonData: {}\n"}}'
-log "Loki datasource patched: isDefault=false, uid=loki"
+# Примечание: loki.isDefault=false задан в values.yaml — Prometheus остаётся default datasource
 
 # ── Security logs dashboard ConfigMap ─────────────────────────────────────────
 kubectl apply -f "${DASHBOARD_MANIFEST}"

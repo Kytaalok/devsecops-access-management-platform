@@ -4,6 +4,10 @@
 # ── Loki ─────────────────────────────────────────────────────────────────────
 loki:
   enabled: true
+  # Prometheus уже является default datasource в Grafana — Loki не должен конфликтовать
+  isDefault: false
+  # Фиксируем UID чтобы дашборды могли ссылаться на datasource по uid: loki
+  uid: loki
 
   persistence:
     enabled: true

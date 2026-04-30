@@ -8,6 +8,12 @@ grafana:
 
   defaultDashboardsTimezone: Europe/Moscow
 
+  # Корректный root_url для работы за Traefik HTTPS reverse proxy
+  grafana.ini:
+    server:
+      root_url: "https://grafana.83.69.249.206.nip.io/"
+      serve_from_sub_path: "false"
+
   persistence:
     enabled: true
     storageClassName: local-path
