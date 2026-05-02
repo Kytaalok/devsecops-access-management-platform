@@ -78,8 +78,17 @@ spec:
 
   environment {
     SEMGREP_CONFIG = 'p/ci'
+  
+    REGISTRY = "${params.REGISTRY}"
+    TRIVY_SEVERITY = "${params.TRIVY_SEVERITY}"
+    SERVER_IP = "${params.SERVER_IP}"
+    NAMESPACE = "${params.NAMESPACE}"
+    JENKINS_NAMESPACE = "${params.JENKINS_NAMESPACE}"
+  
+    SEMGREP_STRICT = "${params.SEMGREP_STRICT}"
+    TRIVY_STRICT = "${params.TRIVY_STRICT}"
   }
-
+  
   stages {
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -87,8 +96,12 @@ spec:
       steps {
         checkout scm
         script {
-          env.IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
-          echo "IMAGE_TAG=${env.IMAGE_TAG}  REGISTRY=${params.REGISTRY}"
+          env.IMAGE_TAG = sh(
+            returnStdout: true,
+            script: 'git rev-parse --short HEAD'
+          ).trim()
+    
+          echo "IMAGE_TAG=${env.IMAGE_TAG}  REGISTRY=${env.REGISTRY}"
         }
       }
     }
