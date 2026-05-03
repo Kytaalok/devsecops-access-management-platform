@@ -432,6 +432,8 @@ spec:
       }
     }
 
+  }
+
   post {
     success {
       echo "Pipeline SUCCESS — IMAGE_TAG=${env.IMAGE_TAG ?: 'n/a'}"
