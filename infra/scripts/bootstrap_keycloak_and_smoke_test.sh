@@ -515,7 +515,7 @@ test_postgres_query() {
 
 # Detect whether we are running inside a pod (in-cluster) or outside.
 # Inside: use the pod's service account token and CA.
-# Outside: rely on the default kubeconfig (already set up on the node/VPS).
+# Outside: use API server/CA from kubeconfig, but do not reuse admin credentials.
 K8S_RBAC_OPTS=()
 if [[ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]]; then
   K8S_RBAC_OPTS=(
@@ -524,7 +524,24 @@ if [[ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]]; then
   )
   log "Running inside pod — using in-cluster k8s API"
 else
-  log "Running outside pod — using default kubeconfig for k8s API"
+  K8S_API_SERVER="${K8S_API_SERVER:-$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)}"
+  K8S_CA_CERT="${K8S_CA_CERT:-/var/lib/rancher/k3s/server/tls/server-ca.crt}"
+  if [[ ! -f "${K8S_CA_CERT}" ]]; then
+    K8S_CA_DATA="$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' 2>/dev/null || true)"
+    if [[ -n "${K8S_CA_DATA}" ]]; then
+      K8S_CA_CERT="${TMP_DIR}/k8s-ca.crt"
+      printf '%s' "${K8S_CA_DATA}" | base64 -d > "${K8S_CA_CERT}"
+    fi
+  fi
+  if [[ -n "${K8S_API_SERVER}" && -f "${K8S_CA_CERT}" ]]; then
+    K8S_RBAC_OPTS=(
+      "--server=${K8S_API_SERVER}"
+      "--certificate-authority=${K8S_CA_CERT}"
+    )
+    log "Running outside pod — using token-only k8s API checks via ${K8S_API_SERVER}"
+  else
+    die "Cannot configure token-only k8s RBAC checks. Set K8S_API_SERVER and K8S_CA_CERT."
+  fi
 fi
 
 # test_clusterrole_exists NAME
@@ -652,26 +669,57 @@ VIEWER_TOKEN="$(get_user_token "${VIEWER_USER}" "${USERS_PASSWORD}")"
 [[ -n "${DEV_TOKEN}" ]]    && pass "Token for ${DEV_USER}"    || fail "Failed to get token for ${DEV_USER}"
 [[ -n "${VIEWER_TOKEN}" ]] && pass "Token for ${VIEWER_USER}" || fail "Failed to get token for ${VIEWER_USER}"
 
+ADMIN_USER_ID=""
+DEV_USER_ID=""
+VIEWER_USER_ID=""
+
 if [[ -n "${ADMIN_TOKEN}" ]]; then
   code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" -H "Authorization: Bearer ${ADMIN_TOKEN}" "${API_URL}/me" || true)"
   role="$(jq -r '.role // empty' "${REQ_BODY}" 2>/dev/null || true)"
-  [[ "${code}" == "200" && "${role}" == "admin" ]] && pass "/me for ${ADMIN_USER} returns admin" || fail "/me for ${ADMIN_USER} failed (HTTP ${code}, role=${role})"
+  ADMIN_USER_ID="$(jq -r '.id // empty' "${REQ_BODY}" 2>/dev/null || true)"
+  [[ "${code}" == "200" && "${role}" == "admin" && -n "${ADMIN_USER_ID}" ]] && pass "/me for ${ADMIN_USER} returns admin" || fail "/me for ${ADMIN_USER} failed (HTTP ${code}, role=${role})"
 fi
 
 if [[ -n "${DEV_TOKEN}" ]]; then
   code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" -H "Authorization: Bearer ${DEV_TOKEN}" "${API_URL}/me" || true)"
   role="$(jq -r '.role // empty' "${REQ_BODY}" 2>/dev/null || true)"
-  [[ "${code}" == "200" && "${role}" == "developer" ]] && pass "/me for ${DEV_USER} returns developer" || fail "/me for ${DEV_USER} failed (HTTP ${code}, role=${role})"
+  DEV_USER_ID="$(jq -r '.id // empty' "${REQ_BODY}" 2>/dev/null || true)"
+  [[ "${code}" == "200" && "${role}" == "developer" && -n "${DEV_USER_ID}" ]] && pass "/me for ${DEV_USER} returns developer" || fail "/me for ${DEV_USER} failed (HTTP ${code}, role=${role})"
 fi
 
 if [[ -n "${VIEWER_TOKEN}" ]]; then
   code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" -H "Authorization: Bearer ${VIEWER_TOKEN}" "${API_URL}/me" || true)"
   role="$(jq -r '.role // empty' "${REQ_BODY}" 2>/dev/null || true)"
-  [[ "${code}" == "200" && "${role}" == "viewer" ]] && pass "/me for ${VIEWER_USER} returns viewer" || fail "/me for ${VIEWER_USER} failed (HTTP ${code}, role=${role})"
+  VIEWER_USER_ID="$(jq -r '.id // empty' "${REQ_BODY}" 2>/dev/null || true)"
+  [[ "${code}" == "200" && "${role}" == "viewer" && -n "${VIEWER_USER_ID}" ]] && pass "/me for ${VIEWER_USER} returns viewer" || fail "/me for ${VIEWER_USER} failed (HTTP ${code}, role=${role})"
 fi
 
 log "Running API RBAC tests..."
 test_http_code "Unauthorized /me" "401" "${API_URL}/me"
+test_http_code "Unauthorized /tasks" "401" "${API_URL}/tasks"
+
+if [[ -n "${DEV_TOKEN}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"title":"","description":"invalid","status":"new"}' \
+    "${API_URL}/tasks" || true)"
+  [[ "${code}" == "422" ]] && pass "Invalid task title rejected (422)" || fail "Invalid task title expected 422, got ${code}"
+
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"title":"invalid-status","description":"invalid","status":"blocked"}' \
+    "${API_URL}/tasks" || true)"
+  [[ "${code}" == "422" ]] && pass "Invalid task status rejected (422)" || fail "Invalid task status expected 422, got ${code}"
+fi
+
+if [[ -n "${ADMIN_TOKEN}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    "${API_URL}/tasks/999999999" || true)"
+  [[ "${code}" == "404" ]] && pass "Missing task returns 404" || fail "Missing task expected 404, got ${code}"
+fi
 
 if [[ -n "${VIEWER_TOKEN}" ]]; then
   code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
@@ -698,6 +746,7 @@ if [[ -n "${ADMIN_TOKEN}" ]]; then
 fi
 
 DEV_TASK_ID=""
+DEV_DELETE_TASK_ID=""
 if [[ -n "${DEV_TOKEN}" ]]; then
   code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
     -H "Authorization: Bearer ${DEV_TOKEN}" \
@@ -709,6 +758,75 @@ if [[ -n "${DEV_TOKEN}" ]]; then
     pass "Developer can create task (201)"
   else
     fail "Developer create task expected 201, got ${code}"
+  fi
+
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"title\":\"dev-delete-smoke-$(date +%s)\",\"description\":\"smoke\",\"status\":\"new\"}" \
+    "${API_URL}/tasks" || true)"
+  if [[ "${code}" == "201" ]]; then
+    DEV_DELETE_TASK_ID="$(jq -r '.id // empty' "${REQ_BODY}")"
+    pass "Developer can create task for delete test (201)"
+  else
+    fail "Developer create delete-test task expected 201, got ${code}"
+  fi
+fi
+
+if [[ -n "${ADMIN_TOKEN}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    "${API_URL}/tasks" || true)"
+  if [[ "${code}" == "200" ]] && jq -e 'type == "array"' "${REQ_BODY}" >/dev/null 2>&1; then
+    pass "Admin can list tasks (200)"
+  else
+    fail "Admin list tasks expected 200 array, got ${code}"
+  fi
+fi
+
+if [[ -n "${ADMIN_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    "${API_URL}/tasks/${DEV_TASK_ID}" || true)"
+  task_id="$(jq -r '.id // empty' "${REQ_BODY}" 2>/dev/null || true)"
+  [[ "${code}" == "200" && "${task_id}" == "${DEV_TASK_ID}" ]] && pass "Admin can read developer task (200)" || fail "Admin read developer task expected 200, got ${code}"
+fi
+
+if [[ -n "${VIEWER_TOKEN}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${VIEWER_TOKEN}" \
+    "${API_URL}/tasks" || true)"
+  if [[ "${code}" == "200" ]] && jq -e 'type == "array"' "${REQ_BODY}" >/dev/null 2>&1; then
+    pass "Viewer can list tasks (200)"
+  else
+    fail "Viewer list tasks expected 200 array, got ${code}"
+  fi
+fi
+
+if [[ -n "${VIEWER_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${VIEWER_TOKEN}" \
+    "${API_URL}/tasks/${DEV_TASK_ID}" || true)"
+  task_id="$(jq -r '.id // empty' "${REQ_BODY}" 2>/dev/null || true)"
+  [[ "${code}" == "200" && "${task_id}" == "${DEV_TASK_ID}" ]] && pass "Viewer can read task (200)" || fail "Viewer read task expected 200, got ${code}"
+fi
+
+if [[ -n "${DEV_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    "${API_URL}/tasks/${DEV_TASK_ID}" || true)"
+  task_id="$(jq -r '.id // empty' "${REQ_BODY}" 2>/dev/null || true)"
+  [[ "${code}" == "200" && "${task_id}" == "${DEV_TASK_ID}" ]] && pass "Developer can read own task (200)" || fail "Developer read own task expected 200, got ${code}"
+fi
+
+if [[ -n "${DEV_TOKEN}" && -n "${DEV_USER_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    "${API_URL}/tasks" || true)"
+  if [[ "${code}" == "200" ]] && jq -e --arg owner "${DEV_USER_ID}" 'type == "array" and all(.[]; .owner_id == $owner)' "${REQ_BODY}" >/dev/null 2>&1; then
+    pass "Developer list contains only own tasks (200)"
+  else
+    fail "Developer list own tasks expected 200 and only owner_id=${DEV_USER_ID}, got ${code}"
   fi
 fi
 
@@ -722,6 +840,27 @@ if [[ -n "${DEV_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
   [[ "${code}" == "200" ]] && pass "Developer can update own task (200)" || fail "Developer update own task expected 200, got ${code}"
 fi
 
+if [[ -n "${DEV_TOKEN}" && -n "${ADMIN_TASK_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    "${API_URL}/tasks/${ADMIN_TASK_ID}" || true)"
+  [[ "${code}" == "403" ]] && pass "Developer cannot read another user's task (403)" || fail "Developer read another user's task expected 403, got ${code}"
+
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -X PUT \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"status":"archived"}' \
+    "${API_URL}/tasks/${ADMIN_TASK_ID}" || true)"
+  [[ "${code}" == "403" ]] && pass "Developer cannot update another user's task (403)" || fail "Developer update another user's task expected 403, got ${code}"
+
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -X DELETE \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    "${API_URL}/tasks/${ADMIN_TASK_ID}" || true)"
+  [[ "${code}" == "403" ]] && pass "Developer cannot delete another user's task (403)" || fail "Developer delete another user's task expected 403, got ${code}"
+fi
+
 if [[ -n "${VIEWER_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
   code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
     -X PUT \
@@ -732,12 +871,66 @@ if [[ -n "${VIEWER_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
   [[ "${code}" == "403" ]] && pass "Viewer cannot update task (403)" || fail "Viewer update task expected 403, got ${code}"
 fi
 
-# cleanup created tasks (best effort)
-if [[ -n "${ADMIN_TOKEN}" && -n "${ADMIN_TASK_ID}" ]]; then
-  curl -sS -o /dev/null -w "" -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" "${API_URL}/tasks/${ADMIN_TASK_ID}" || true
+if [[ -n "${VIEWER_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -X DELETE \
+    -H "Authorization: Bearer ${VIEWER_TOKEN}" \
+    "${API_URL}/tasks/${DEV_TASK_ID}" || true)"
+  [[ "${code}" == "403" ]] && pass "Viewer cannot delete task (403)" || fail "Viewer delete task expected 403, got ${code}"
 fi
+
 if [[ -n "${ADMIN_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
-  curl -sS -o /dev/null -w "" -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" "${API_URL}/tasks/${DEV_TASK_ID}" || true
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -X PUT \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"status":"archived"}' \
+    "${API_URL}/tasks/${DEV_TASK_ID}" || true)"
+  [[ "${code}" == "200" ]] && pass "Admin can update any task (200)" || fail "Admin update any task expected 200, got ${code}"
+fi
+
+if [[ -n "${DEV_TOKEN}" && -n "${DEV_DELETE_TASK_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -X DELETE \
+    -H "Authorization: Bearer ${DEV_TOKEN}" \
+    "${API_URL}/tasks/${DEV_DELETE_TASK_ID}" || true)"
+  if [[ "${code}" == "204" ]]; then
+    pass "Developer can delete own task (204)"
+    DEV_DELETE_TASK_ID=""
+  else
+    fail "Developer delete own task expected 204, got ${code}"
+  fi
+fi
+
+if [[ -n "${ADMIN_TOKEN}" && -n "${ADMIN_TASK_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -X DELETE \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    "${API_URL}/tasks/${ADMIN_TASK_ID}" || true)"
+  if [[ "${code}" == "204" ]]; then
+    pass "Admin can delete own task (204)"
+    ADMIN_TASK_ID=""
+  else
+    fail "Admin delete own task expected 204, got ${code}"
+  fi
+fi
+
+if [[ -n "${ADMIN_TOKEN}" && -n "${DEV_TASK_ID}" ]]; then
+  code="$(curl -sS -o "${REQ_BODY}" -w "%{http_code}" \
+    -X DELETE \
+    -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    "${API_URL}/tasks/${DEV_TASK_ID}" || true)"
+  if [[ "${code}" == "204" ]]; then
+    pass "Admin can delete developer task (204)"
+    DEV_TASK_ID=""
+  else
+    fail "Admin delete developer task expected 204, got ${code}"
+  fi
+fi
+
+# cleanup created tasks (best effort)
+if [[ -n "${ADMIN_TOKEN}" && -n "${DEV_DELETE_TASK_ID}" ]]; then
+  curl -sS -o /dev/null -w "" -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" "${API_URL}/tasks/${DEV_DELETE_TASK_ID}" || true
 fi
 
 # ====================== Kubernetes RBAC Tests ================================
@@ -748,10 +941,11 @@ test_clusterrole_exists "diploma:admin"
 test_clusterrole_exists "diploma:developer"
 test_clusterrole_exists "diploma:viewer"
 test_clusterrolebinding_exists "diploma:admin-cluster"
-test_rolebinding_exists "diploma:admin-task-manager-api" "${NAMESPACE}"
-test_rolebinding_exists "diploma:admin-cicd" "${JENKINS_NAMESPACE}"
-test_rolebinding_exists "diploma:developer-task-manager-api" "${NAMESPACE}"
-test_rolebinding_exists "diploma:viewer-task-manager-api" "${NAMESPACE}"
+test_rolebinding_exists "diploma:admin" "${NAMESPACE}"
+test_rolebinding_exists "diploma:admin" "${JENKINS_NAMESPACE}"
+test_rolebinding_exists "diploma:developer" "${NAMESPACE}"
+test_rolebinding_exists "diploma:viewer" "${NAMESPACE}"
+test_rolebinding_exists "diploma:jenkins-smoke" "${NAMESPACE}"
 
 log "  Testing admin OIDC token k8s access (oidc:admin -> diploma:admin)..."
 # admin can get nodes (cluster-wide, diploma:admin ClusterRole)
