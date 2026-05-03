@@ -325,11 +325,12 @@ spec:
           )]) {
             sh '''
               set -euo pipefail
+    
               REGISTRY="${REGISTRY}"
               TAG="${IMAGE_TAG}"
               NS="${NAMESPACE}"
               REGISTRY_HOST="$(echo "${REGISTRY}" | cut -d/ -f1)"
-
+    
               echo ">>> Creating/updating ghcr-pull-secret in namespace ${NS}..."
               kubectl create secret docker-registry ghcr-pull-secret \
                 --docker-server="${REGISTRY_HOST}" \
@@ -337,21 +338,50 @@ spec:
                 --docker-password="${REG_PASS}" \
                 -n "${NS}" \
                 --dry-run=client -o yaml | kubectl apply -f -
-
-              echo ">>> Patching imagePullSecrets and imagePullPolicy on deployments..."
-              kubectl patch deployment api-deploy -n "${NS}" \
-                -p "{\"spec\":{\"template\":{\"spec\":{\"imagePullSecrets\":[{\"name\":\"ghcr-pull-secret\"}],\"containers\":[{\"name\":\"api\",\"imagePullPolicy\":\"Always\"}]}}}}"
-              kubectl patch deployment frontend-deploy -n "${NS}" \
-                -p "{\"spec\":{\"template\":{\"spec\":{\"imagePullSecrets\":[{\"name\":\"ghcr-pull-secret\"}],\"containers\":[{\"name\":\"frontend\",\"imagePullPolicy\":\"Always\"}]}}}}"
-
+    
+              echo ">>> Patching api-deploy imagePullSecrets and imagePullPolicy..."
+              cat > /tmp/api-patch.yaml <<'EOF'
+    spec:
+      template:
+        spec:
+          imagePullSecrets:
+            - name: ghcr-pull-secret
+          containers:
+            - name: api
+              imagePullPolicy: Always
+    EOF
+    
+              kubectl patch deployment api-deploy \
+                -n "${NS}" \
+                --type strategic \
+                --patch-file /tmp/api-patch.yaml
+    
+              echo ">>> Patching frontend-deploy imagePullSecrets and imagePullPolicy..."
+              cat > /tmp/frontend-patch.yaml <<'EOF'
+    spec:
+      template:
+        spec:
+          imagePullSecrets:
+            - name: ghcr-pull-secret
+          containers:
+            - name: frontend
+              imagePullPolicy: Always
+    EOF
+    
+              kubectl patch deployment frontend-deploy \
+                -n "${NS}" \
+                --type strategic \
+                --patch-file /tmp/frontend-patch.yaml
+    
               echo ">>> Updating images to tag ${TAG}..."
               kubectl set image deployment/api-deploy \
                 api="${REGISTRY}/task-manager-api:${TAG}" \
                 -n "${NS}"
+    
               kubectl set image deployment/frontend-deploy \
                 frontend="${REGISTRY}/task-manager-frontend:${TAG}" \
                 -n "${NS}"
-
+    
               echo ">>> Annotating deployments with build metadata..."
               kubectl annotate deployment api-deploy frontend-deploy \
                 -n "${NS}" \
