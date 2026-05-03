@@ -340,38 +340,16 @@ spec:
                 --dry-run=client -o yaml | kubectl apply -f -
     
               echo ">>> Patching api-deploy imagePullSecrets and imagePullPolicy..."
-              cat > /tmp/api-patch.yaml <<'EOF'
-    spec:
-      template:
-        spec:
-          imagePullSecrets:
-            - name: ghcr-pull-secret
-          containers:
-            - name: api
-              imagePullPolicy: Always
-    EOF
-    
               kubectl patch deployment api-deploy \
                 -n "${NS}" \
                 --type strategic \
-                --patch-file /tmp/api-patch.yaml
+                -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-pull-secret"}],"containers":[{"name":"api","imagePullPolicy":"Always"}]}}}}'
     
               echo ">>> Patching frontend-deploy imagePullSecrets and imagePullPolicy..."
-              cat > /tmp/frontend-patch.yaml <<'EOF'
-    spec:
-      template:
-        spec:
-          imagePullSecrets:
-            - name: ghcr-pull-secret
-          containers:
-            - name: frontend
-              imagePullPolicy: Always
-    EOF
-    
               kubectl patch deployment frontend-deploy \
                 -n "${NS}" \
                 --type strategic \
-                --patch-file /tmp/frontend-patch.yaml
+                -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-pull-secret"}],"containers":[{"name":"frontend","imagePullPolicy":"Always"}]}}}}'
     
               echo ">>> Updating images to tag ${TAG}..."
               kubectl set image deployment/api-deploy \
