@@ -397,22 +397,40 @@ spec:
       when { expression { return params.RUN_SMOKE_TEST } }
       steps {
         container('kubectl') {
-          sh '''
-            set -euo pipefail
-            mkdir -p reports
-            export SERVER_IP="${SERVER_IP}"
-            export NAMESPACE="${NAMESPACE}"
-            export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
-            bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh 2>&1 | tee reports/smoke-test.log
-          '''
+          withCredentials([string(
+            credentialsId: 'keycloak-admin-password',
+            variable: 'KEYCLOAK_ADMIN_PASSWORD'
+          )]) {
+            sh '''
+              set -euo pipefail
+    
+              mkdir -p reports
+    
+              export SERVER_IP="${SERVER_IP}"
+              export NAMESPACE="${NAMESPACE}"
+              export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
+              export KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD}"
+    
+              if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+                cat /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/diploma-ca.crt > /tmp/combined-ca.crt
+              else
+                cp /etc/ssl/certs/diploma-ca.crt /tmp/combined-ca.crt
+              fi
+    
+              export CURL_CA_BUNDLE="/tmp/combined-ca.crt"
+              export SSL_CERT_FILE="/tmp/combined-ca.crt"
+    
+              bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh 2>&1 | tee reports/smoke-test.log
+            '''
+          }
         }
       }
       post {
-        always { archiveArtifacts artifacts: 'reports/smoke-test.log', allowEmptyArchive: true }
+        always {
+          archiveArtifacts artifacts: 'reports/smoke-test.log', allowEmptyArchive: true
+        }
       }
     }
-
-  }
 
   post {
     success {
