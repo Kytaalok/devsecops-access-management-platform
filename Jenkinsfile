@@ -48,6 +48,11 @@ spec:
       command: ["sleep"]
       args: ["99d"]
       tty: true
+      volumeMounts:
+        - name: diploma-ca
+          mountPath: /etc/ssl/certs/diploma-ca.crt
+          subPath: diploma-ca.crt
+          readOnly: true
 '''
     }
   }
@@ -325,12 +330,11 @@ spec:
           )]) {
             sh '''
               set -euo pipefail
-    
               REGISTRY="${REGISTRY}"
               TAG="${IMAGE_TAG}"
               NS="${NAMESPACE}"
               REGISTRY_HOST="$(echo "${REGISTRY}" | cut -d/ -f1)"
-    
+
               echo ">>> Creating/updating ghcr-pull-secret in namespace ${NS}..."
               kubectl create secret docker-registry ghcr-pull-secret \
                 --docker-server="${REGISTRY_HOST}" \
@@ -338,28 +342,21 @@ spec:
                 --docker-password="${REG_PASS}" \
                 -n "${NS}" \
                 --dry-run=client -o yaml | kubectl apply -f -
-    
-              echo ">>> Patching api-deploy imagePullSecrets and imagePullPolicy..."
-              kubectl patch deployment api-deploy \
-                -n "${NS}" \
-                --type strategic \
-                -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-pull-secret"}],"containers":[{"name":"api","imagePullPolicy":"Always"}]}}}}'
-    
-              echo ">>> Patching frontend-deploy imagePullSecrets and imagePullPolicy..."
-              kubectl patch deployment frontend-deploy \
-                -n "${NS}" \
-                --type strategic \
-                -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-pull-secret"}],"containers":[{"name":"frontend","imagePullPolicy":"Always"}]}}}}'
-    
+
+              echo ">>> Patching imagePullSecrets and imagePullPolicy on deployments..."
+              kubectl patch deployment api-deploy -n "${NS}" \
+                -p "{\"spec\":{\"template\":{\"spec\":{\"imagePullSecrets\":[{\"name\":\"ghcr-pull-secret\"}],\"containers\":[{\"name\":\"api\",\"imagePullPolicy\":\"Always\"}]}}}}"
+              kubectl patch deployment frontend-deploy -n "${NS}" \
+                -p "{\"spec\":{\"template\":{\"spec\":{\"imagePullSecrets\":[{\"name\":\"ghcr-pull-secret\"}],\"containers\":[{\"name\":\"frontend\",\"imagePullPolicy\":\"Always\"}]}}}}"
+
               echo ">>> Updating images to tag ${TAG}..."
               kubectl set image deployment/api-deploy \
                 api="${REGISTRY}/task-manager-api:${TAG}" \
                 -n "${NS}"
-    
               kubectl set image deployment/frontend-deploy \
                 frontend="${REGISTRY}/task-manager-frontend:${TAG}" \
                 -n "${NS}"
-    
+
               echo ">>> Annotating deployments with build metadata..."
               kubectl annotate deployment api-deploy frontend-deploy \
                 -n "${NS}" \
@@ -400,38 +397,18 @@ spec:
       when { expression { return params.RUN_SMOKE_TEST } }
       steps {
         container('kubectl') {
-          withCredentials([string(
-            credentialsId: 'keycloak-admin-password',
-            variable: 'KEYCLOAK_ADMIN_PASSWORD'
-          )]) {
-            sh '''
-              set -euo pipefail
-    
-              mkdir -p reports
-    
-              export SERVER_IP="${SERVER_IP}"
-              export NAMESPACE="${NAMESPACE}"
-              export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
-              export KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD}"
-    
-              if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-                cat /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/diploma-ca.crt > /tmp/combined-ca.crt
-              else
-                cp /etc/ssl/certs/diploma-ca.crt /tmp/combined-ca.crt
-              fi
-    
-              export CURL_CA_BUNDLE="/tmp/combined-ca.crt"
-              export SSL_CERT_FILE="/tmp/combined-ca.crt"
-    
-              bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh 2>&1 | tee reports/smoke-test.log
-            '''
-          }
+          sh '''
+            set -euo pipefail
+            mkdir -p reports
+            export SERVER_IP="${SERVER_IP}"
+            export NAMESPACE="${NAMESPACE}"
+            export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
+            bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh 2>&1 | tee reports/smoke-test.log
+          '''
         }
       }
       post {
-        always {
-          archiveArtifacts artifacts: 'reports/smoke-test.log', allowEmptyArchive: true
-        }
+        always { archiveArtifacts artifacts: 'reports/smoke-test.log', allowEmptyArchive: true }
       }
     }
 
