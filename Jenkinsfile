@@ -11,17 +11,22 @@ spec:
     - name: docker-sock
       hostPath:
         path: /var/run/docker.sock
+    - name: diploma-ca
+      secret:
+        secretName: diploma-ca-cert
   containers:
     - name: gitleaks
       image: ghcr.io/gitleaks/gitleaks:v8.30.0
       command: ["sleep"]
       args: ["99d"]
       tty: true
+
     - name: semgrep
       image: returntocorp/semgrep:1.160.0
       command: ["sleep"]
       args: ["99d"]
       tty: true
+
     - name: trivy
       image: aquasec/trivy:latest
       command: ["sleep"]
@@ -30,6 +35,7 @@ spec:
       volumeMounts:
         - name: docker-sock
           mountPath: /var/run/docker.sock
+
     - name: docker
       image: docker:27-cli
       command: ["sleep"]
@@ -38,11 +44,13 @@ spec:
       volumeMounts:
         - name: docker-sock
           mountPath: /var/run/docker.sock
+
     - name: python
       image: python:3.12-slim
       command: ["sleep"]
       args: ["99d"]
       tty: true
+
     - name: kubectl
       image: alpine/k8s:1.30.4
       command: ["sleep"]
