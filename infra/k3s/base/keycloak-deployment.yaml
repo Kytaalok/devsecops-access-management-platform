@@ -26,6 +26,10 @@ spec:
                 secretKeyRef:
                   name: keycloak-secret
                   key: KEYCLOAK_ADMIN
+            - name: KC_SPI_EVENTS_LISTENER_JBOSS_LOGGING_SUCCESS_LEVEL
+              value: info
+            - name: KC_SPI_EVENTS_LISTENER_JBOSS_LOGGING_ERROR_LEVEL
+              value: warn
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
