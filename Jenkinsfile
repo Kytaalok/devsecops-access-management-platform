@@ -118,15 +118,14 @@ spec:
           sh '''
             set -euo pipefail
             cd services/task-manager-api
-            pip install --no-cache-dir -r requirements.txt
+            python -m pip install --no-cache-dir -r requirements.txt
             mkdir -p ../../reports
-            pytest -q --junitxml=../../reports/api-pytest.xml
+            PYTHONPATH="$PWD" python -m pytest -q --junitxml=../../reports/api-pytest.xml
           '''
         }
       }
       post {
         always {
-          junit allowEmptyResults: true, testResults: 'reports/api-pytest.xml'
           archiveArtifacts artifacts: 'reports/api-pytest.xml', allowEmptyArchive: true
         }
       }
