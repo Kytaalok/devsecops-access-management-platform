@@ -38,6 +38,11 @@ spec:
       volumeMounts:
         - name: docker-sock
           mountPath: /var/run/docker.sock
+    - name: python
+      image: python:3.12-slim
+      command: ["sleep"]
+      args: ["99d"]
+      tty: true
     - name: kubectl
       image: alpine/k8s:1.30.4
       command: ["sleep"]
@@ -102,6 +107,27 @@ spec:
           ).trim()
     
           echo "IMAGE_TAG=${env.IMAGE_TAG}  REGISTRY=${env.REGISTRY}"
+        }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    stage('API Unit Tests') {
+      steps {
+        container('python') {
+          sh '''
+            set -euo pipefail
+            cd services/task-manager-api
+            pip install --no-cache-dir -r requirements.txt
+            mkdir -p ../../reports
+            pytest -q --junitxml=../../reports/api-pytest.xml
+          '''
+        }
+      }
+      post {
+        always {
+          junit allowEmptyResults: true, testResults: 'reports/api-pytest.xml'
+          archiveArtifacts artifacts: 'reports/api-pytest.xml', allowEmptyArchive: true
         }
       }
     }
