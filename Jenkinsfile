@@ -352,11 +352,16 @@ spec:
                 --dry-run=client -o yaml | kubectl apply -f -
 
               echo ">>> Patching imagePullSecrets and imagePullPolicy on deployments..."
-              kubectl patch deployment api-deploy -n "${NS}" \
-                -p "{\"spec\":{\"template\":{\"spec\":{\"imagePullSecrets\":[{\"name\":\"ghcr-pull-secret\"}],\"containers\":[{\"name\":\"api\",\"imagePullPolicy\":\"Always\"}]}}}}"
-              kubectl patch deployment frontend-deploy -n "${NS}" \
-                -p "{\"spec\":{\"template\":{\"spec\":{\"imagePullSecrets\":[{\"name\":\"ghcr-pull-secret\"}],\"containers\":[{\"name\":\"frontend\",\"imagePullPolicy\":\"Always\"}]}}}}"
-
+              kubectl patch deployment api-deploy \
+                -n "${NS}" \
+                --type strategic \
+                -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-pull-secret"}],"containers":[{"name":"api","imagePullPolicy":"Always"}]}}}}'
+              
+              kubectl patch deployment frontend-deploy \
+                -n "${NS}" \
+                --type strategic \
+                -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ghcr-pull-secret"}],"containers":[{"name":"frontend","imagePullPolicy":"Always"}]}}}}'
+                
               echo ">>> Updating images to tag ${TAG}..."
               kubectl set image deployment/api-deploy \
                 api="${REGISTRY}/task-manager-api:${TAG}" \
