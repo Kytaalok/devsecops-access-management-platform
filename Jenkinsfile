@@ -414,6 +414,15 @@ spec:
               export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
               export KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD}"
     
+              if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+                cat /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/diploma-ca.crt > /tmp/combined-ca.crt
+              else
+                cp /etc/ssl/certs/diploma-ca.crt /tmp/combined-ca.crt
+              fi
+    
+              export CURL_CA_BUNDLE="/tmp/combined-ca.crt"
+              export SSL_CERT_FILE="/tmp/combined-ca.crt"
+    
               bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh 2>&1 | tee reports/smoke-test.log
             '''
           }
