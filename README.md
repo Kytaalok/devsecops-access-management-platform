@@ -24,7 +24,7 @@
 - `infra/k3s/base` - Kustomize base для API, frontend, PostgreSQL, Keycloak, Ingress и RBAC.
 - `infra/k3s/jenkins` - Helm/JCasC-конфигурация Jenkins и связанные Kubernetes-ресурсы.
 - `infra/k3s/monitoring` - Prometheus, Loki, Grafana, datasource и dashboard security events.
-- `infra/scripts` - bootstrap Keycloak, smoke-тесты, установка monitoring/Loki.
+- `infra/scripts` - bootstrap Keycloak, smoke-тесты, генерация тестовых пользователей, установка monitoring/Loki.
 - `docs/testing` - методика и протокол тестирования.
 - `docs/testing/artifacts` - переносимые отчёты тестов, например `api-pytest.xml`.
 - `docs/appendices` - приложения к ВКР: манифесты, Jenkinsfile, JCasC, smoke-script, Grafana, logs.
@@ -96,6 +96,12 @@ NAMESPACE=task-manager-api \
 JENKINS_NAMESPACE=cicd \
 KEYCLOAK_ADMIN_PASSWORD=<password> \
 bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh
+```
+
+Скрипт генерации тестовой популяции Keycloak:
+
+```bash
+USER_COUNT=100 ADMIN_COUNT=10 DEVELOPER_COUNT=45 bash infra/scripts/create_keycloak_test_users.sh
 ```
 
 Скрипт проверяет:

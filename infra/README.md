@@ -101,4 +101,22 @@ USERS_PASSWORD=111 \
 ./infra/scripts/bootstrap_keycloak_and_smoke_test.sh
 ```
 
+## Генерация тестовых пользователей Keycloak
 
+Для проверки требования масштабирования до 100 пользователей используется отдельный идемпотентный скрипт:
+
+```bash
+USER_COUNT=100 \
+ADMIN_COUNT=10 \
+DEVELOPER_COUNT=45 \
+USERS_PASSWORD=111 \
+bash infra/scripts/create_keycloak_test_users.sh
+```
+
+По умолчанию создаются пользователи `loaduser001` ... `loaduser100`:
+
+- `loaduser001` ... `loaduser010` — роль `admin`;
+- `loaduser011` ... `loaduser055` — роль `developer`;
+- `loaduser056` ... `loaduser100` — роль `viewer`.
+
+Скрипт можно запускать повторно: существующие пользователи обновляются, пароль переустанавливается, роль назначается заново.
