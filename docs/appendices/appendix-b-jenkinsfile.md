@@ -1,3 +1,10 @@
+# Приложение Б. Jenkinsfile
+
+В приложении приведен полный текст декларативного Jenkins pipeline, используемого для проверки, сборки, сканирования, публикации образов и развертывания приложения в Kubernetes.
+
+### Файл `Jenkinsfile`
+
+```groovy
 pipeline {
   agent {
     kubernetes {
@@ -11,22 +18,17 @@ spec:
     - name: docker-sock
       hostPath:
         path: /var/run/docker.sock
-    - name: diploma-ca
-      secret:
-        secretName: diploma-ca-cert
   containers:
     - name: gitleaks
       image: ghcr.io/gitleaks/gitleaks:v8.30.0
       command: ["sleep"]
       args: ["99d"]
       tty: true
-
     - name: semgrep
       image: returntocorp/semgrep:1.160.0
       command: ["sleep"]
       args: ["99d"]
       tty: true
-
     - name: trivy
       image: aquasec/trivy:latest
       command: ["sleep"]
@@ -35,7 +37,6 @@ spec:
       volumeMounts:
         - name: docker-sock
           mountPath: /var/run/docker.sock
-
     - name: docker
       image: docker:27-cli
       command: ["sleep"]
@@ -44,23 +45,16 @@ spec:
       volumeMounts:
         - name: docker-sock
           mountPath: /var/run/docker.sock
-
     - name: python
       image: python:3.12-slim
       command: ["sleep"]
       args: ["99d"]
       tty: true
-
     - name: kubectl
       image: alpine/k8s:1.30.4
       command: ["sleep"]
       args: ["99d"]
       tty: true
-      volumeMounts:
-        - name: diploma-ca
-          mountPath: /etc/ssl/certs/diploma-ca.crt
-          subPath: diploma-ca.crt
-          readOnly: true
 '''
     }
   }
@@ -96,15 +90,6 @@ spec:
 
   environment {
     SEMGREP_CONFIG = 'p/ci'
-
-    REGISTRY = "${params.REGISTRY}"
-    TRIVY_SEVERITY = "${params.TRIVY_SEVERITY}"
-    SERVER_IP = "${params.SERVER_IP}"
-    NAMESPACE = "${params.NAMESPACE}"
-    JENKINS_NAMESPACE = "${params.JENKINS_NAMESPACE}"
-
-    SEMGREP_STRICT = "${params.SEMGREP_STRICT}"
-    TRIVY_STRICT = "${params.TRIVY_STRICT}"
   }
 
   stages {
@@ -114,12 +99,8 @@ spec:
       steps {
         checkout scm
         script {
-          env.IMAGE_TAG = sh(
-            returnStdout: true,
-            script: 'git rev-parse --short HEAD'
-          ).trim()
-
-          echo "IMAGE_TAG=${env.IMAGE_TAG}  REGISTRY=${env.REGISTRY}"
+          env.IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+          echo "IMAGE_TAG=${env.IMAGE_TAG}  REGISTRY=${params.REGISTRY}"
         }
       }
     }
@@ -131,14 +112,15 @@ spec:
           sh '''
             set -euo pipefail
             cd services/task-manager-api
-            python -m pip install --no-cache-dir -r requirements.txt
+            pip install --no-cache-dir -r requirements.txt
             mkdir -p ../../reports
-            PYTHONPATH="$PWD" python -m pytest -q --junitxml=../../reports/api-pytest.xml
+            pytest -q --junitxml=../../reports/api-pytest.xml
           '''
         }
       }
       post {
         always {
+          junit allowEmptyResults: true, testResults: 'reports/api-pytest.xml'
           archiveArtifacts artifacts: 'reports/api-pytest.xml', allowEmptyArchive: true
         }
       }
@@ -306,32 +288,117 @@ spec:
           )]) {
             sh '''
               set -euo pipefail
+              REGISTRY="${REGISTRY}"
+              TAG="${IMAGE_TAG}"
+              REGISTRY_HOST="$(echo "${REGISTRY}" | cut -d/ -f1)"
 
-              mkdir -p reports
+              echo "${REG_PASS}" | docker login "${REGISTRY_HOST}" -u "${REG_USER}" --password-stdin
 
-              export SERVER_IP="${SERVER_IP}"
-              export NAMESPACE="${NAMESPACE}"
-              export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
-              export KEYCLOAK_ADMIN_PASSWORD="${KEYCLOAK_ADMIN_PASSWORD}"
+              docker push "${REGISTRY}/task-manager-api:${TAG}"
+              docker push "${REGISTRY}/task-manager-api:latest"
+              docker push "${REGISTRY}/task-manager-frontend:${TAG}"
+              docker push "${REGISTRY}/task-manager-frontend:latest"
 
-              if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-                cat /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/diploma-ca.crt > /tmp/combined-ca.crt
-              else
-                cp /etc/ssl/certs/diploma-ca.crt /tmp/combined-ca.crt
-              fi
-
-              export CURL_CA_BUNDLE="/tmp/combined-ca.crt"
-              export SSL_CERT_FILE="/tmp/combined-ca.crt"
-
-              bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh 2>&1 | tee reports/smoke-test.log
+              docker logout "${REGISTRY_HOST}" || true
+              echo ">>> Pushed ${REGISTRY}/task-manager-api:${TAG}"
+              echo ">>> Pushed ${REGISTRY}/task-manager-frontend:${TAG}"
             '''
           }
         }
       }
-      post {
-        always {
-          archiveArtifacts artifacts: 'reports/smoke-test.log', allowEmptyArchive: true
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    stage('Deploy') {
+      when { expression { return params.BUILD_AND_DEPLOY } }
+      steps {
+        container('kubectl') {
+          withCredentials([usernamePassword(
+            credentialsId: params.REGISTRY_CREDS,
+            usernameVariable: 'REG_USER',
+            passwordVariable: 'REG_PASS'
+          )]) {
+            sh '''
+              set -euo pipefail
+              REGISTRY="${REGISTRY}"
+              TAG="${IMAGE_TAG}"
+              NS="${NAMESPACE}"
+              REGISTRY_HOST="$(echo "${REGISTRY}" | cut -d/ -f1)"
+
+              echo ">>> Creating/updating ghcr-pull-secret in namespace ${NS}..."
+              kubectl create secret docker-registry ghcr-pull-secret \
+                --docker-server="${REGISTRY_HOST}" \
+                --docker-username="${REG_USER}" \
+                --docker-password="${REG_PASS}" \
+                -n "${NS}" \
+                --dry-run=client -o yaml | kubectl apply -f -
+
+              echo ">>> Patching imagePullSecrets and imagePullPolicy on deployments..."
+              kubectl patch deployment api-deploy -n "${NS}" \
+                -p "{\"spec\":{\"template\":{\"spec\":{\"imagePullSecrets\":[{\"name\":\"ghcr-pull-secret\"}],\"containers\":[{\"name\":\"api\",\"imagePullPolicy\":\"Always\"}]}}}}"
+              kubectl patch deployment frontend-deploy -n "${NS}" \
+                -p "{\"spec\":{\"template\":{\"spec\":{\"imagePullSecrets\":[{\"name\":\"ghcr-pull-secret\"}],\"containers\":[{\"name\":\"frontend\",\"imagePullPolicy\":\"Always\"}]}}}}"
+
+              echo ">>> Updating images to tag ${TAG}..."
+              kubectl set image deployment/api-deploy \
+                api="${REGISTRY}/task-manager-api:${TAG}" \
+                -n "${NS}"
+              kubectl set image deployment/frontend-deploy \
+                frontend="${REGISTRY}/task-manager-frontend:${TAG}" \
+                -n "${NS}"
+
+              echo ">>> Annotating deployments with build metadata..."
+              kubectl annotate deployment api-deploy frontend-deploy \
+                -n "${NS}" \
+                --overwrite \
+                deploy.kubernetes.io/image-tag="${TAG}" \
+                deploy.kubernetes.io/deployed-by="jenkins-build-${BUILD_NUMBER}"
+            '''
+          }
         }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    stage('Rollout Check') {
+      when { expression { return params.BUILD_AND_DEPLOY } }
+      steps {
+        container('kubectl') {
+          sh '''
+            set -euo pipefail
+            NS="${NAMESPACE}"
+
+            echo ">>> Waiting for api-deploy rollout..."
+            kubectl rollout status deployment/api-deploy -n "${NS}" --timeout=180s
+
+            echo ">>> Waiting for frontend-deploy rollout..."
+            kubectl rollout status deployment/frontend-deploy -n "${NS}" --timeout=180s
+
+            echo ">>> Final pod status:"
+            kubectl get pods -n "${NS}" -l "app in (api,frontend)" \
+              -o custom-columns="NAME:.metadata.name,STATUS:.status.phase,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready"
+          '''
+        }
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    stage('Smoke + RBAC Test') {
+      when { expression { return params.RUN_SMOKE_TEST } }
+      steps {
+        container('kubectl') {
+          sh '''
+            set -euo pipefail
+            mkdir -p reports
+            export SERVER_IP="${SERVER_IP}"
+            export NAMESPACE="${NAMESPACE}"
+            export JENKINS_NAMESPACE="${JENKINS_NAMESPACE}"
+            bash infra/scripts/bootstrap_keycloak_and_smoke_test.sh 2>&1 | tee reports/smoke-test.log
+          '''
+        }
+      }
+      post {
+        always { archiveArtifacts artifacts: 'reports/smoke-test.log', allowEmptyArchive: true }
       }
     }
 
@@ -346,3 +413,6 @@ spec:
     }
   }
 }
+
+````
+

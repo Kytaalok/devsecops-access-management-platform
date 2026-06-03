@@ -1,0 +1,101 @@
+# Приложение В. JCasC-конфигурация Jenkins
+
+Jenkins развертывается Helm chart. Конфигурация Jenkins Configuration as Code находится в файле `infra/k3s/jenkins/values.yaml` в блоке `controller.JCasC`. В приложении приведен полный values-файл, так как он содержит привязку Jenkins к Keycloak OIDC, список плагинов, настройки Ingress, persistence и agent-контейнеров.
+
+### Файл `infra/k3s/jenkins/values.yaml`
+
+```yaml
+controller:
+  admin:
+    createSecret: false
+    existingSecret: jenkins-admin-secret
+    userKey: jenkins-admin-user
+    passwordKey: jenkins-admin-password
+
+  additionalExistingSecrets:
+    - name: jenkins-admin-secret
+      keyName: jenkins-admin-user
+    - name: jenkins-admin-secret
+      keyName: jenkins-admin-password
+    - name: jenkins-oidc
+      keyName: client-id
+    - name: jenkins-oidc
+      keyName: client-secret
+
+  serviceType: ClusterIP
+  jenkinsUrl: "https://jenkins.83.69.249.206.nip.io"
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostName: jenkins.83.69.249.206.nip.io
+    path: /
+
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 20Gi
+
+  installLatestPlugins: false
+  installPlugins:
+    - kubernetes
+    - workflow-aggregator
+    - git
+    - credentials-binding
+    - ssh-agent
+    - configuration-as-code
+    - role-strategy
+    - oic-auth
+
+  JCasC:
+    securityRealm: |-
+      oic:
+        serverConfiguration:
+          wellKnown:
+            wellKnownOpenIDConfigurationUrl: "https://keycloak.83.69.249.206.nip.io/realms/devsecops/.well-known/openid-configuration"
+            scopesOverride: "openid profile email "
+        clientId: "${jenkins-oidc-client-id}"
+        clientSecret: "${jenkins-oidc-client-secret}"
+
+        userNameField: "preferred_username"
+        fullNameFieldName: "name"
+        emailFieldName: "email"
+
+        logoutFromOpenidProvider: true
+        rootURLFromRequest: false
+        postLogoutRedirectUrl: "https://jenkins.83.69.249.206.nip.io/securityRealm/commenceLogin?from=%2F"
+
+        allowTokenAccessWithoutOicSession: false
+        disableSslVerification: false
+        tokenExpirationCheckDisabled: false
+
+        properties:
+          - pkce
+          - escapeHatch:
+              username: "${jenkins-admin-secret-jenkins-admin-user}"
+              secret: "${jenkins-admin-secret-jenkins-admin-password}"
+              group: "jenkins-admins"
+
+    authorizationStrategy: |-
+      loggedInUsersCanDoAnything:
+        allowAnonymousRead: false
+
+agent:
+  enabled: true
+
+  volumes:
+    - type: HostPath
+      hostPath: /var/run/docker.sock
+      mountPath: /var/run/docker.sock
+
+  additionalContainers:
+    - sideContainerName: docker-cli
+      image:
+        repository: docker
+        tag: "27.5.1-cli"
+      command: "sleep"
+      args: "99d"
+
+
+````
+
